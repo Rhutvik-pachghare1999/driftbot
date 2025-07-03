@@ -1,0 +1,43 @@
+# Secrets / credentials
+firmware/config/secrets.h
+
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.pioaccesslibs/
+
+# ROS2 workspace build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Runtime / session artifacts
+*.log
+*.pid
+bags/
+microros_ws/
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local working notes (not part of the published project)
+MEMORY.md
+STATE.md
+docs/plan.md
+opencode.json
+.opencode/
+.aider*
+Embodied_AI_Brain/
