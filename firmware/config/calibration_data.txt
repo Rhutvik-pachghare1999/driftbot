@@ -1,0 +1,113 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# DriftBot Calibration Data
+# Date: 2026-07-16
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Store calibration values here after each calibration session.
+# These values are used to correct sensor readings in the main firmware.
+#
+# HOW TO USE:
+#   Run calibration tool: cd ~/Drift_bot/firmware/calibration && pio run --target upload
+#   Record values below after each test.
+#   Apply to firmware constants when ready.
+#
+
+# ──────────────────────────────────────────────────────────────────────────────
+# IMU (MPU6050) — Calibrated 2026-07-16
+# ──────────────────────────────────────────────────────────────────────────────
+# Conditions: Robot flat on desk, perfectly still, 500 samples over 5 seconds
+#
+# MOUNTING: IMU chip X-axis points UP (not forward)
+# Rotation matrix in firmware corrects this:
+#   robot_x = -sensor_z
+#   robot_y =  sensor_y
+#   robot_z =  sensor_x
+#
+# RAW SENSOR FRAME BIAS (subtract from raw readings BEFORE rotation):
+imu_gyro_bias_x:  -0.0469   # rad/s
+imu_gyro_bias_y:  -0.0007   # rad/s
+imu_gyro_bias_z:  +0.0086   # rad/s
+
+imu_accel_bias_x: +10.2418  # m/s² (gravity is here — X points UP)
+imu_accel_bias_y: -0.0548   # m/s²
+imu_accel_bias_z: -9.7807   # m/s² (expected: 0 for horizontal axis)
+
+# ROBOT FRAME (after rotation matrix):
+# Corrected accel: X≈0, Y≈0, Z≈+9.75 m/s² ← gravity on robot Z ✅
+# Corrected gyro:  all near zero when still ✅
+#
+# CRITICAL: Gyro Z drift without correction = 29.6°/minute
+# After correction: < 1°/minute (acceptable for SLAM)
+#
+# VERIFIED 2026-07-16:
+#   Tilt forward → robot aX goes positive ✅
+#   Spin left (CCW) → robot gZ goes positive (+1.936 rad/s measured) ✅
+#   Rotation matrix is CORRECT ✅
+#   Gyroscope WORKS (must spin flat, not tilt) ✅
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ToF (VL53L1X) — Calibrated 2026-07-16
+# ──────────────────────────────────────────────────────────────────────────────
+# Procedure: White paper at 140mm, per sensor individually
+# All sensors reading within ±3mm — excellent accuracy
+#
+tof_offset_0: -0.3    # mm (Sensor 0)
+tof_offset_1: -1.1    # mm (Sensor 1)
+tof_offset_2: -3.2    # mm (Sensor 2)
+
+# Mount angles — verified by pointing each at known front/back walls:
+# Front wall at ~50cm, back wall at ~15cm, servo 90° = robot forward
+#   Sensor 0: reads back wall (15cm) at servo 90° → faces 180° (backward)
+#   Sensor 1: reads back wall (16cm) at servo 155° → faces 115° (left-back)
+#   Sensor 2: reads front wall (50cm) at servo 90° → faces 0° (forward)
+#
+tof_mount_angle_0: 180.0   # was 240° — CORRECTED (off by 60°!)
+tof_mount_angle_1: 115.0   # was 120° — corrected (off by 5°)
+tof_mount_angle_2: 0.0     # correct ✅
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Encoders — NOT YET CALIBRATED
+# ──────────────────────────────────────────────────────────────────────────────
+# ticks_per_revolution: 10    # theoretical (verify with mode 3)
+# meters_per_tick: 0.0201     # theoretical = π × 0.064 / 10
+# actual_wheel_diameter: 0.064  # meters (verify by driving 1m)
+# actual_wheel_separation: 0.128  # meters (verify with UMBmark test)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Steering Servo — Calibrated 2026-07-16
+# ──────────────────────────────────────────────────────────────────────────────
+# Dead zone: ~3-5° (servo doesn't respond to smaller changes)
+# Pulse range: 1832µs to 2142µs (usable range)
+#
+steer_center: 140   # degrees (wheels perfectly straight)
+steer_min: 125      # degrees (full right turn)
+steer_max: 155      # degrees (full left turn)
+steer_center_pulse: 1987  # µs
+steer_min_pulse: 1832     # µs
+steer_max_pulse: 2142     # µs
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Scanning Servo — Calibrated 2026-07-16
+# ──────────────────────────────────────────────────────────────────────────────
+# Auto-align result: Sensor 2 closest to front wall at servo 84°
+# Servo is off by -6° from expected 90°
+# Fix: SERVO_CENTER_DEG = 96 (so that center + offset = true forward)
+#
+# Readings at 84°: 507mm (minimum) — wall in front
+# Readings at 60°: 666mm, at 120°: 542mm
+#
+servo_center_actual: 96    # corrected (was 90°, sensor plate rotated -6°)
+servo_pulse_min_us: 500
+servo_pulse_max_us: 2500
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Motor — Calibrated 2026-07-16
+# ──────────────────────────────────────────────────────────────────────────────
+# Forward/Reverse are swapped in wiring (negated in cmd_vel callback)
+motor_min_useful_pwm: 35    # below this motor stalls
+motor_max_pwm: 200          # limited from 225 max for safety
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ACS712 Current Sensor — NOT YET INSTALLED
+# ──────────────────────────────────────────────────────────────────────────────
+# See notes below for integration plan.
