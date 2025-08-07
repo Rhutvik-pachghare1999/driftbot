@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>driftbot_bringup</name>
+  <version>0.1.0</version>
+  <description>DriftBot laptop-side nodes: scan assembly, odometry, SLAM launch</description>
+  <maintainer email="rhutvik@todo.com">rhutvik</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>micro_ros_agent</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
