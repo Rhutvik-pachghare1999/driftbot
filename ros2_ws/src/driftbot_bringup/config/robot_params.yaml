@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# DriftBot Robot Parameters
+# ══════════════════════════════════════════════════════════════════════════════
+
+odometry_node:
+  ros__parameters:
+    # Wheel geometry
+    wheel_diameter: 0.064        # 64mm in meters
+    wheel_separation: 0.128      # 128mm between rear wheel centers
+    wheelbase: 0.235             # 235mm from front axle to rear axle
+    ticks_per_revolution: 10     # 10 magnets per wheel
+
+    # Steering
+    steer_center: 140            # Servo angle for straight ahead (calibrated)
+    steer_min: 125               # Full right (calibrated)
+    steer_max: 155               # Full left (calibrated)
+
+    # Model type
+    model: "ackermann"           # Ackermann (car-like) steering
+
+    # Publishing
+    odom_frame: "odom"
+    base_frame: "base_link"
+    publish_tf: true
+
+scan_assembler:
+  ros__parameters:
+    # Sensor mount angles (degrees, matching ESP32 tof_config.h)
+    mount_angle_0: 180.0         # Sensor 0 = backward (calibrated)
+    mount_angle_1: 115.0         # Sensor 1 = left-rear (calibrated)
+    mount_angle_2: 0.0           # Sensor 2 = forward (reference)
+
+    # Servo reference angle (servo at this angle = robot forward)
+    servo_reference: 96.0
+
+    # LaserScan parameters
+    scan_frame: "base_scan"
+    angle_min: 0.0               # 0 degrees (radians: 0)
+    angle_max: 360.0             # 360 degrees (radians: 2π)
+    num_bins: 360                # 1° resolution
+    range_min: 0.04              # 40mm (VL53L1X minimum)
+    range_max: 4.0               # 4000mm (VL53L1X maximum)
+    scan_timeout: 2.5            # seconds — one full sweep ~2.1s at speed=3.0
