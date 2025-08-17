@@ -1,0 +1,53 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# slam_toolbox parameters for DriftBot
+# ══════════════════════════════════════════════════════════════════════════════
+
+slam_toolbox:
+  ros__parameters:
+    # Mode
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # Input topics
+    scan_topic: /scan
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+
+    # Scan matching
+    mode: mapping
+
+    # Resolution — lower = more detail but slower
+    resolution: 0.05  # 5cm per cell (good for indoor)
+    max_laser_range: 4.0  # Match VL53L1X max range
+
+    # Update frequency
+    minimum_travel_distance: 0.1    # meters before new scan added
+    minimum_travel_heading: 0.1     # radians before new scan added
+
+    # Scan buffer
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 4.0
+
+    # Loop closure
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 3
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # Map
+    map_update_interval: 2.0  # seconds between map publishes
+    transform_publish_period: 0.02  # 50Hz TF publish
+
+    # Performance
+    use_scan_matching: true
+    use_scan_barycenter: true
+    throttle_scans: 1
+
+    # Stack size
+    stack_size_to_use: 40000000

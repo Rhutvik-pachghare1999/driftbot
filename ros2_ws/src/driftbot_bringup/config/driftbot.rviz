@@ -1,0 +1,152 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    # ── Grid (ground reference) ────────────────────────────────────────────
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Line Style:
+        Line Width: 0.03
+      Normal Cell Count: 20
+      Offset: {X: 0, Y: 0, Z: 0}
+      Plane: XY
+      Plane Cell Count: 20
+      Color: 100; 100; 100
+
+    # ── TF Tree (shows frame alignment — look for jumps/misalignment) ──────
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.5
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0
+
+    # ── Robot Odometry (purple arrow — shows where robot thinks it is) ──────
+    - Class: rviz_default_plugins/Odometry
+      Name: Odometry
+      Enabled: true
+      Topic:
+        Value: /odom
+        Reliability: Reliable
+        Durability: Volatile
+      Position Tolerance: 0.1
+      Angle Tolerance: 0.1
+      Keep: 100
+      Shape:
+        Value: Arrow
+        Color: 170; 0; 255
+        Alpha: 1
+        Shaft Length: 0.1
+        Shaft Radius: 0.02
+        Head Length: 0.03
+        Head Radius: 0.04
+
+    # ── LaserScan (red dots — 360° scan from ToF assembly) ─────────────────
+    - Class: rviz_default_plugins/LaserScan
+      Name: LaserScan
+      Enabled: true
+      Topic:
+        Value: /scan
+        Reliability: Reliable
+        Durability: Volatile
+      Size (m): 0.05
+      Color Transformer: FlatColor
+      Color: 255; 50; 50
+      Alpha: 1
+      Style: Points
+      Min Intensity: 0
+      Max Intensity: 4096
+      Decay Time: 3
+
+    # ── Map (from slam_toolbox — occupancy grid) ───────────────────────────
+    - Class: rviz_default_plugins/Map
+      Name: Map
+      Enabled: true
+      Topic:
+        Value: /map
+        Reliability: Reliable
+        Durability: Volatile
+      Alpha: 0.7
+      Color Scheme: map
+      Draw Behind: true
+
+    # ── IMU acceleration (green arrow — shows tilt/acceleration direction) ──
+    - Class: rviz_default_plugins/Marker
+      Name: IMU Marker
+      Enabled: false
+      Topic:
+        Value: /imu/marker
+
+    # ── Range Sensors (ToF cones — shows individual sensor beams) ──────────
+    - Class: rviz_default_plugins/Range
+      Name: ToF Sensor 0
+      Enabled: true
+      Topic:
+        Value: /tof/sensor_0
+        Reliability: Reliable
+        Durability: Volatile
+      Color: 255; 255; 0
+      Alpha: 0.3
+
+    - Class: rviz_default_plugins/Range
+      Name: ToF Sensor 1
+      Enabled: true
+      Topic:
+        Value: /tof/sensor_1
+        Reliability: Reliable
+        Durability: Volatile
+      Color: 0; 255; 255
+      Alpha: 0.3
+
+    - Class: rviz_default_plugins/Range
+      Name: ToF Sensor 2
+      Enabled: true
+      Topic:
+        Value: /tof/sensor_2
+        Reliability: Reliable
+        Durability: Volatile
+      Color: 0; 255; 0
+      Alpha: 0.3
+
+  Global Options:
+    Background Color: 30; 30; 30
+    Fixed Frame: odom
+    Frame Rate: 30
+
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /goal_pose
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: TopDown
+      Scale: 20
+      X: 0
+      Y: 0
+      Angle: 0
+
+Window Geometry:
+  Width: 1400
+  Height: 900
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: true
