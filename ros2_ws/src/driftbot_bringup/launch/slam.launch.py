@@ -1,6 +1,12 @@
 """
 slam.launch.py — Launch all DriftBot laptop-side nodes
 
+NOTE: This is the ENCODER-ENABLED configuration. It launches `odometry_node`
+(wheel-encoder odometry) and an EKF that fuses wheel odom + IMU. On the current
+physical robot the wheel encoders are DISABLED (wiring reliability), so use
+`bringup.launch.py` (IMU-only EKF, scan-matching localization) to reproduce the
+recorded hardware sessions. Use this file only once encoders are re-enabled.
+
 Launches:
   1. odometry_node      — encoder ticks → /odom + TF(odom→base_link)
   2. scan_assembler     — ToF + servo → /scan

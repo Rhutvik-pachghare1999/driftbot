@@ -16,9 +16,9 @@
  *   MOTOR_MIN_USEFUL = 35  Below this the motor stalls (not enough torque)
  *
  * STEERING ANGLES (degrees written to servo):
- *   STEER_CENTER = 130   Wheels point straight (not 90° — servo trim offset)
- *   STEER_MIN = 115      Full right turn
- *   STEER_MAX = 145      Full left turn
+ *   STEER_CENTER = 140   Wheels point straight (not 90° — servo trim offset)
+ *   STEER_MIN = 125      Full right turn
+ *   STEER_MAX = 155      Full left turn
  *   Range = ±15° from center
  */
 

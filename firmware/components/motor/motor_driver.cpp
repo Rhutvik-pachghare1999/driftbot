@@ -2,7 +2,7 @@
  * motor_driver.cpp — DC Motor + Steering Servo
  *
  * ALL raw MCPWM + NO LEDC anywhere in firmware:
- *   Steering: MCPWM Unit 1, Timer 0, Op A, GPIO 7  (50Hz servo)
+ *   Steering: MCPWM Unit 1, Timer 0, Op A, PIN_STEERING (GPIO 10, 50Hz servo)
  *   Motor:    MCPWM Unit 1, Timer 1, Op A/B, GPIO 11/12 (1kHz H-bridge)
  *
  * Scanning servo uses MCPWM Unit 0 (separate hardware).
