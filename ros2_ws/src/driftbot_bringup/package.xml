@@ -3,7 +3,7 @@
   <name>driftbot_bringup</name>
   <version>0.1.0</version>
   <description>DriftBot laptop-side nodes: scan assembly, odometry, SLAM launch</description>
-  <maintainer email="rhutvik@todo.com">rhutvik</maintainer>
+  <maintainer email="rpachagha@asu.edu">Rhutvik Pachghare</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>

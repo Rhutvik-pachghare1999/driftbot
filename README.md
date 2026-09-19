@@ -82,7 +82,7 @@ Reproduce the live setup: `./scripts/start_session.sh` (see Quick Start).
 - XSHUT-based I2C address assignment for three identical VL53L1X sensors
 
 ### Communication — micro-ROS over WiFi
-- 7 ROS2 topics published at 10Hz over UDP
+- Sensor + telemetry topics published over UDP (measured ~1.4 Hz on-robot, see topic table)
 - Standard message types (`Range`, `Imu`, `LaserScan`)
 - One-command laptop startup via `bringup.launch.py`
 
@@ -161,18 +161,27 @@ GPIO 13 / GPIO 14  — Interrupt → Hall encoders (currently disabled)
 
 ## ROS2 Topics
 
-| Topic | Type | Rate | Source |
-|-------|------|------|--------|
-| `/servo/position` | `std_msgs/Float32` | 10Hz | ESP32 |
-| `/tof/sensor_0` | `sensor_msgs/Range` | 10Hz | ESP32 |
-| `/tof/sensor_1` | `sensor_msgs/Range` | 10Hz | ESP32 |
-| `/tof/sensor_2` | `sensor_msgs/Range` | 10Hz | ESP32 |
-| `/imu/data` | `sensor_msgs/Imu` | 50Hz | ESP32 |
-| `/encoder/left` | `std_msgs/Int32` | 50Hz | ESP32 |
-| `/encoder/right` | `std_msgs/Int32` | 50Hz | ESP32 |
-| `/scan` | `sensor_msgs/LaserScan` | ~0.5Hz | Laptop |
-| `/odom` | `nav_msgs/Odometry` | 20Hz | Laptop |
-| `/map` | `nav_msgs/OccupancyGrid` | 0.5Hz | slam_toolbox |
+Rates below are **measured** from the recorded 90-min session
+(`bags/driftbot_ground_20260828_184909`, message count ÷ duration), not nominal
+targets. The on-robot sensor topics settled around ~1.4 Hz in this run (limited
+by the ToF timing budget + WiFi transport), while laptop-side odometry/TF ran at
+~20/40 Hz.
+
+| Topic | Type | Measured rate | Source |
+|-------|------|--------------:|--------|
+| `/tf` | `tf2_msgs/TFMessage` | ~39.9 Hz | Laptop (TF tree) |
+| `/odom` | `nav_msgs/Odometry` | ~20.0 Hz | Laptop |
+| `/odometry/filtered` | `nav_msgs/Odometry` | ~19.9 Hz | robot_localization EKF |
+| `/imu/data` | `sensor_msgs/Imu` | ~1.4 Hz | ESP32 |
+| `/servo/position` | `std_msgs/Float32` | ~1.4 Hz | ESP32 |
+| `/tof/sensor_0..2` | `sensor_msgs/Range` | ~1.4 Hz each | ESP32 |
+| `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | ~1.0 Hz | Laptop |
+| `/scan` | `sensor_msgs/LaserScan` | ~0.36 Hz | Laptop (scan assembler) |
+| `/cmd_vel` | `geometry_msgs/Twist` | on demand | Teleop |
+
+> Encoder topics are present in firmware but were disabled in this session
+> (wiring reliability), so `/odometry/filtered` position stays near origin —
+> localization relied on scan-matching.
 
 ## Quick Start
 
