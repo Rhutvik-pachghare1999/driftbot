@@ -4,10 +4,31 @@ A from-scratch autonomous ground robot featuring a custom rotating ToF sensor ar
 
 **Built to demonstrate:** full-stack robotics — embedded firmware, sensor fusion, state estimation, real-time control, and ROS2 integration on physical hardware.
 
-## Demo
+## Demo & Recorded Evidence
 
-> In progress: 60 s corridor SLAM test video and saved occupancy-grid map.
-> Run `./scripts/start_session.sh` to reproduce the live setup.
+A **90-minute live hardware session** (`.mcap`, ROS2 Jazzy) was recorded with the
+full pipeline running on the physical robot. It captures **475,134 messages**
+across the real topic set — the whole perception → estimation → SLAM chain
+running end-to-end, not a simulation:
+
+| Topic | Type | Messages | What it proves |
+|-------|------|---------:|----------------|
+| `/odometry/filtered` | `nav_msgs/Odometry` | 107,302 | `robot_localization` EKF fusion ran live |
+| `/odom` | `nav_msgs/Odometry` | 107,697 | Base odometry stream |
+| `/tf` | `tf2_msgs/TFMessage` | 215,000 | Full transform tree maintained |
+| `/scan` | `sensor_msgs/LaserScan` | 1,928 | 360° ToF scans assembled from raw Range data |
+| `/imu/data` | `sensor_msgs/Imu` | 7,529 | IMU streaming (bias-corrected) |
+| `/tof/sensor_{0,1,2}` | `sensor_msgs/Range` | 7,529 each | 3× VL53L1X ToF sensors |
+| `/servo/position` | `std_msgs/Float32` | 7,529 | Scanning-servo sweep telemetry |
+| `/cmd_vel` | `geometry_msgs/Twist` | 30 | Teleop drive commands |
+
+Session duration: **~89.9 min** (Aug 28 2026, 18:49→20:19). Bag: `bags/driftbot_ground_20260828_184909/`.
+
+> **Still pending:** a trimmed 60–90 s screen-capture video (robot moving + RViz
+> map building) and a saved occupancy-grid `.pgm/.yaml`. The recorded bag above
+> already contains the data to regenerate both offline via `ros2 bag play`.
+
+Reproduce the live setup: `./scripts/start_session.sh` (see Quick Start).
 
 ## System Architecture
 
