@@ -1,10 +1,14 @@
-# DriftBot — Autonomous Ground Robot with 360° SLAM
+# DriftBot — Autonomous Ground Robot with 360° ToF SLAM (ROS2)
 
 A from-scratch autonomous ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP, enabling real-time SLAM, sensor fusion, and autonomous navigation.
 
 **Built to demonstrate:** full-stack robotics — embedded firmware, sensor fusion, state estimation, real-time control, and ROS2 integration on physical hardware.
 
 ## Demo & Recorded Evidence
+
+![Real recorded session — pipeline throughput and live ToF readings](docs/session_evidence.png)
+
+*Generated directly from the recorded `.mcap` bag — real message counts, not a mock-up.*
 
 A **90-minute live hardware session** (`.mcap`, ROS2 Jazzy) was recorded with the
 full pipeline running on the physical robot. It captures **475,134 messages**
