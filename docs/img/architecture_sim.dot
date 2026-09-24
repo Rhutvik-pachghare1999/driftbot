@@ -1,0 +1,83 @@
+digraph GazeboSim {
+  rankdir=LR;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#1e3a5f", penwidth=1.4];
+  edge [color="#475569", fontname="Helvetica", fontsize=9, penwidth=1.2];
+  labelloc="t";
+  fontsize=15;
+  label="Gazebo Harmonic Simulation — driftbot_corridor.sdf (headless)";
+
+  subgraph cluster_gz {
+    label="gz sim 8.11 (model.sdf: driftbot)";
+    fontsize=12; color="#94a3b8"; style="rounded";
+    node [fillcolor="#dbeafe"];
+
+    ackermann [label="AckermannSteering\n(gz plugin)", fillcolor="#bfdbfe"];
+    jpc       [label="JointPositionController\n(scan_joint, ABS 3 rad/s)", fillcolor="#bfdbfe"];
+    sensors   [label="Sensors (ogre2)\n3× gpu_lidar ToF\nIMU + front camera", fillcolor="#bfdbfe"];
+    odom_gz   [label="gz odometry\nwheel kinematics", fillcolor="#bfdbfe"];
+  }
+
+  subgraph cluster_gzc {
+    label="gz transport topics";
+    fontsize=12; color="#94a3b8"; style="rounded";
+    node [shape=ellipse, style="filled", fillcolor="#fef9c3"];
+
+    t_cmdvel  [label="/model/driftbot/cmd_vel\ngz.msgs.Twist"];
+    t_odom    [label="/model/driftbot/odometry\ngz.msgs.Odometry"];
+    t_tof     [label="/tof/sensor_{0,1,2}\ngz.msgs.LaserScan"];
+    t_imu     [label="/imu/data\ngz.msgs.IMU"];
+    t_cam     [label="/camera/image_raw\ngz.msgs.Image"];
+    t_joint   [label="/scan_joint/cmd_pos\ngz.msgs.Double"];
+  }
+
+  subgraph cluster_bridge {
+    label="ros_gz_bridge (parameter_bridge)";
+    fontsize=12; color="#94a3b8"; style="rounded";
+    node [fillcolor="#fde68a"];
+    b_cmdvel [label="cmd_vel\nTwist ROS→gz"];
+    b_odom   [label="odom\nOdometry gz→ROS"];
+    b_tof    [label="tof_raw\nLaserScan gz→ROS"];
+    b_rest   [label="imu, camera, clock\n+ scan_joint cmd\ngz↔ROS"];
+  }
+
+  subgraph cluster_nodes {
+    label="laptop stack (reused unmodified + sim adapters)";
+    fontsize=12; color="#94a3b8"; style="rounded";
+    node [fillcolor="#dcfce7"];
+
+    servo_sweep  [label="servo_sweep.py\nsine 96±60 deg @ 50 Hz\n(mirrors firmware)"];
+    tof_adapter  [label="tof_adapter.py\nLaserScan → Range\n(base_scan frame)"];
+    odom_tf      [label="odom_tf.py\nodom → TF odom→base_link"];
+    scan_asm     [label="scan_assembler\n3× Range + servo angle\n→ /scan (360 bins)", fillcolor="#bbf7d0"];
+    slam         [label="slam_toolbox\n(lifecycle node)\nasync SLAM → /map", fillcolor="#bbf7d0"];
+    tf_static    [label="static TF\nbase_link→base_scan (z 0.05)\nbase_link→camera_link"];
+  }
+
+  subgraph cluster_ros {
+    label="ROS 2 Jazzy topics";
+    fontsize=12; color="#94a3b8"; style="rounded";
+    node [shape=ellipse, style="filled", fillcolor="#fef9c3"];
+
+    r_cmdvel [label="/cmd_vel"];
+    r_servo  [label="/servo/position\nFloat32 deg"];
+    r_tof     [label="/tof/sensor_{0,1,2}\nsensor_msgs/Range"];
+    r_scan    [label="/scan\nLaserScan 360 bins"];
+    r_map     [label="/map\nOccupancyGrid"];
+    r_tf      [label="/tf + /tf_static"];
+  }
+
+  user [label="teleop / ros2 topic pub", shape=oval, fillcolor="#fbcfe8"];
+
+  user -> r_cmdvel -> b_cmdvel -> t_cmdvel -> ackermann;
+  ackermann -> odom_gz -> t_odom -> b_odom -> odom_tf -> r_tf;
+  sensors -> t_tof -> b_tof -> tof_adapter -> r_tof -> scan_asm -> r_scan -> slam -> r_map;
+  sensors -> t_imu -> b_rest;
+  sensors -> t_cam -> b_rest;
+  servo_sweep -> t_joint -> jpc [label="gz.msgs.Double"];
+  servo_sweep -> r_servo -> scan_asm [label="servo angle"];
+  scan_asm -> slam [label="TF: odom→base_scan"];
+  tf_static -> r_tf;
+  r_tf -> slam [style=dashed];
+  slam -> r_tf [label="map→odom", style=dashed];
+}

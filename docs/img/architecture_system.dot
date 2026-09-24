@@ -1,0 +1,83 @@
+digraph SystemArchitecture {
+  rankdir=TB;
+  bgcolor="white";
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#1e3a5f", penwidth=1.4];
+  edge [color="#475569", fontname="Helvetica", fontsize=9, penwidth=1.2];
+  labelloc="t";
+  fontsize=15;
+  label="DriftBot — End-to-End System Architecture (real hardware)";
+
+  subgraph cluster_esp {
+    label="ESP32-S3-DevKitC-1 (firmware/src/main.cpp, dual core)";
+    fontsize=12; color="#0f766e"; style="rounded"; penwidth=2;
+    node [fillcolor="#ccfbf1"];
+
+    subgraph cluster_c0 {
+      label="Core 0 — real-time control (MCPWM Unit 1)";
+      fontsize=10; color="#14b8a6"; style="rounded";
+      node [fillcolor="#99f6e4"];
+      steering [label="steering servo\nMG90S @ 140 deg center\nMCPWM1 Timer 0"];
+      motor    [label="DC motor + BTS7960\nH-bridge PWM\nMCPWM1 Timer 1\n(cmd_vel negated: wiring)"];
+      watchdog [label="motor watchdog\n1000 ms auto-stop"];
+    }
+
+    subgraph cluster_c1 {
+      label="Core 1 — sensors + comms (MCPWM Unit 0)";
+      fontsize=10; color="#14b8a6"; style="rounded";
+      node [fillcolor="#99f6e4"];
+      tof   [label="3× VL53L1X ToF\nXSHUT addr 0x30/31/32\nWire (GPIO 8/9) 100 kHz"];
+      imu   [label="MPU6050 IMU\nbias-corrected, rotated\nWire1 (GPIO 7/17) 100 kHz"];
+      scan  [label="scan servo\nMG90S 96±60 deg @ 3 rad/s\nMCPWM0 Timer 0"];
+      ros   [label="micro-ROS client\n7 topics @ ~1.4 Hz\nWiFi UDP :8888"];
+    }
+  }
+
+  wifi [label="WiFi UDP 8888", shape=oval, fillcolor="#fef08a"];
+  agent [label="micro-ROS agent\n(microros_ws)", fillcolor="#fde68a"];
+
+  subgraph cluster_laptop {
+    label="Laptop — ROS 2 Jazzy (driftbot_bringup)";
+    fontsize=12; color="#1d4ed8"; style="rounded"; penwidth=2;
+    node [fillcolor="#dbeafe"];
+
+    subgraph cluster_percept {
+      label="perception (scan_assembler.py)";
+      fontsize=10; color="#3b82f6"; style="rounded";
+      node [fillcolor="#bfdbfe"];
+      assembler [label="scan_assembler\ntrue_angle = (servo-96) + mount\nmounts 180/115/0 deg\n→ /scan 360 bins @ 5 cm"];
+    }
+
+    subgraph cluster_estim {
+      label="estimation";
+      fontsize=10; color="#3b82f6"; style="rounded";
+      node [fillcolor="#bfdbfe"];
+      odom [label="odometry_node\n(static identity —\nencoders disabled)", fillcolor="#e2e8f0"];
+      ekf  [label="robot_localization EKF\n(optional, off by default)", fillcolor="#e2e8f0"];
+      slam [label="slam_toolbox (lifecycle)\nasync SLAM\nscan matching → /map", fillcolor="#bbf7d0"];
+    }
+
+    tf [label="static TF: base_link→base_scan (z 0.05)\nbase_link→imu_link", fillcolor="#e2e8f0"];
+    rviz [label="RViz2", fillcolor="#fbcfe8"];
+    bag  [label="rosbag2 recorder\n(.mcap)", fillcolor="#fbcfe8"];
+    teleop [label="teleop_twist_keyboard\n→ /cmd_vel", fillcolor="#fbcfe8"];
+  }
+
+  tof -> ros [label="Range ~1.4 Hz"];
+  imu -> ros [label="Imu ~1.4 Hz"];
+  scan -> ros [label="servo deg"];
+  motor -> ros [style=invis];
+  ros -> wifi [label="micro-ROS XRCE"];
+  wifi -> agent [label="UDP 8888"];
+  agent -> assembler [label="/tof/sensor_{0,1,2}\n/servo/position"];
+  agent -> tf [style=invis];
+  assembler -> slam [label="/scan"];
+  teleop -> agent [label="/cmd_vel → motor (negated)"];
+  tf -> slam [label="/tf_static"];
+  slam -> rviz [label="/map, /tf map→odom"];
+  slam -> bag;
+  assembler -> rviz;
+  assembler -> bag;
+  ekf -> tf [label="/odometry/filtered →\nTF odom→base_link", style=dashed];
+  odom -> ekf [label="/odom (identity)"];
+  odom -> tf [style=dashed, label="TF odom→base_link\n(use_ekf:=false)"];
+}

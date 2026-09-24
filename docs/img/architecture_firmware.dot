@@ -1,0 +1,72 @@
+digraph FirmwareArchitecture {
+  rankdir=TB;
+  bgcolor="white";
+  compound=true;
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#1e3a5f", penwidth=1.4];
+  edge [color="#475569", fontname="Helvetica", fontsize=9, penwidth=1.2];
+  labelloc="t";
+  fontsize=15;
+  label="ESP32-S3 Firmware — Dual-Core Task Layout (firmware/src/main.cpp)";
+
+  subgraph cluster_pins {
+    label="GPIO pin map (firmware/config/pins.h)";
+    fontsize=12; color="#a16207"; style="rounded";
+    node [shape=note, fillcolor="#fef3c7", fontsize=10];
+
+    pins_i2c0  [label="Wire (I2C bus 0)\nGPIO 8 SDA / GPIO 9 SCL\n→ 3× VL53L1X 0x30/0x31/0x32"];
+    pins_i2c1  [label="Wire1 (I2C bus 1)\nGPIO 7 SDA / GPIO 17 SCL\next. 4.7–10 kΩ pull-ups\n→ MPU6050 0x68"];
+    pins_xshut [label="GPIO 4 / 5 / 6\nXSHUT → ToF addr assign"];
+    pins_scan  [label="GPIO 18 (MCPWM0)\nscan servo PWM"];
+    pins_steer [label="GPIO 10 (MCPWM1 T0)\nsteering servo PWM"];
+    pins_motor [label="GPIO 11 / 12 PWM\nGPIO 15 / 16 enable\nBTS7960 H-bridge"];
+  }
+
+  subgraph cluster_core0 {
+    label="Core 0 — real-time control loop (firmware/config/motor_config.h)";
+    fontsize=12; color="#b91c1c"; style="rounded"; penwidth=2;
+    node [fillcolor="#fee2e2"];
+
+    cmd_serial [label="serial command handler\nmotor watchdog 1000 ms"];
+    steer_ctl  [label="steering control\nMCPWM Unit 1 / Timer 0\n140 deg center, 125–155 deg"];
+    motor_ctl  [label="motor control\nMCPWM Unit 1 / Timer 1\nmin PWM 35, max 200\n(cmd_vel negated: wiring)"];
+    safety     [label="cmd_vel watchdog\nzero Twist on timeout"];
+  }
+
+  subgraph cluster_core1 {
+    label="Core 1 — sensors + comms (firmware/components/*)";
+    fontsize=12; color="#1d4ed8"; style="rounded"; penwidth=2;
+    node [fillcolor="#dbeafe"];
+
+    tof_task  [label="tof_driver\n3× VL53L1X ranging\n20 ms timing budget\n→ Range msgs"];
+    imu_task  [label="imu_driver\nMPU6050, gyro bias XYZ\nrotation: robot_x=-sensor_z\nrobot_y=sensor_y, robot_z=sensor_x\n→ Imu msgs"];
+    scan_task [label="servo_driver\nsine sweep 96±60 deg\n3 rad/s @ ~1.4 Hz\n→ Float32 servo deg"];
+    ros_task  [label="ros_bridge (micro-ROS)\n7 publishers @ ~1.4 Hz\nWiFi UDP 8888"];
+    wifi      [label="WiFi init\nthen servo_init()\n2nd call — MCPWM\nre-init after radio"];
+  }
+
+  micro_ros [label="micro-ROS agent\n(laptop, microros_ws)\n→ ROS 2 Jazzy", shape=oval, fillcolor="#fef9c3"];
+
+  cmd_vel [label="/cmd_vel\ngeometry_msgs/Twist", shape=ellipse, style="filled", fillcolor="#fef9c3"];
+  topics [label="/tof/sensor_{0,1,2} Range\n/servo/position Float32\n/imu/data Imu\n/odom Odometry", shape=ellipse, style="filled", fillcolor="#fef9c3"];
+
+  cmd_vel -> cmd_serial [label="WiFi UDP\nfrom laptop"];
+  cmd_serial -> steer_ctl;
+  cmd_serial -> motor_ctl;
+  motor_ctl -> safety [style=dashed];
+
+  pins_i2c0 -> tof_task;
+  pins_i2c1 -> imu_task;
+  pins_xshut -> tof_task;
+  pins_scan -> scan_task;
+  pins_steer -> steer_ctl;
+  pins_motor -> motor_ctl;
+
+  wifi -> ros_task [label="init order"];
+  scan_task -> ros_task [label="servo deg"];
+  tof_task -> ros_task [label="ranges"];
+  imu_task -> ros_task [label="6-axis"];
+
+  steer_ctl -> scan_task [style=invis];
+  ros_task -> micro_ros [label="micro-ROS XRCE\nWiFi UDP :8888"];
+  micro_ros -> topics [style=invis];
+}
