@@ -1,321 +1,245 @@
 # DriftBot — Autonomous Ground Robot with 360° ToF SLAM (ROS2)
 
-A from-scratch autonomous ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP, enabling real-time SLAM, sensor fusion, and autonomous navigation.
+A from-scratch autonomous ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP for real-time SLAM — and the entire robot is **simulated in Gazebo Harmonic** with a matching sensor suite for reproducible, hardware-free runs.
 
-**Built to demonstrate:** full-stack robotics — embedded firmware, sensor fusion, state estimation, real-time control, and ROS2 integration on physical hardware.
+**Built to demonstrate:** full-stack robotics — embedded firmware, sensor fusion, state estimation, real-time control, ROS2 integration, and simulation.
 
-## Demo & Recorded Evidence
+---
 
-![Real recorded session — pipeline throughput and live ToF readings](docs/session_evidence.png)
+## 1. System Architecture
 
-*Generated directly from the recorded `.mcap` bag — real message counts, not a mock-up.*
+![Real system architecture — ESP32-S3 dual-core firmware over micro-ROS to the ROS2 laptop stack](docs/img/architecture_system.png)
 
-A **90-minute live hardware session** (`.mcap`, ROS2 Jazzy) was recorded with the
-full pipeline running on the physical robot. It captures **475,134 messages**
-across the real topic set — the whole perception → estimation → SLAM chain
-running end-to-end, not a simulation:
+*ESP32-S3 (Core 0 = real-time motor/steering, Core 1 = sensors + micro-ROS) → WiFi UDP → laptop stack (scan_assembler → slam_toolbox, optional EKF, RViz, rosbag2).*
 
-| Topic | Type | Messages | What it proves |
-|-------|------|---------:|----------------|
-| `/odometry/filtered` | `nav_msgs/Odometry` | 107,302 | `robot_localization` EKF fusion ran live |
-| `/odom` | `nav_msgs/Odometry` | 107,697 | Base odometry stream |
-| `/tf` | `tf2_msgs/TFMessage` | 215,000 | Full transform tree maintained |
-| `/scan` | `sensor_msgs/LaserScan` | 1,928 | 360° ToF scans assembled from raw Range data |
-| `/imu/data` | `sensor_msgs/Imu` | 7,529 | IMU streaming (bias-corrected) |
-| `/tof/sensor_{0,1,2}` | `sensor_msgs/Range` | 7,529 each | 3× VL53L1X ToF sensors |
-| `/servo/position` | `std_msgs/Float32` | 7,529 | Scanning-servo sweep telemetry |
-| `/cmd_vel` | `geometry_msgs/Twist` | 30 | Teleop drive commands |
+![Firmware block diagram — dual-core task layout, pin map, I2C buses](docs/img/architecture_firmware.png)
 
-Session duration: **~89.9 min** (Aug 28 2026, 18:49→20:19). Bag: `bags/driftbot_ground_20260828_184909/`.
+*Two I2C buses (`Wire` = 3× VL53L1X ToF, `Wire1` = MPU6050 IMU), MCPWM Unit 1 for drive, Unit 0 for the scanning servo, micro-ROS client publishing 7 topics at ~1.4 Hz.*
 
-> **Still pending:** a trimmed 60–90 s screen-capture video (robot moving + RViz
-> map building) and a saved occupancy-grid `.pgm/.yaml`. The recorded bag above
-> already contains the data to regenerate both offline via `ros2 bag play`.
+## 2. Real Measured Data (90-minute hardware session)
 
-Reproduce the live setup: `./scripts/start_session.sh` (see Quick Start).
+All plots below are generated **from the recorded `.mcap` bag** (`bags/driftbot_ground_20260828_184909`, 475,134 messages, 5392 s on the physical robot) by `scripts/make_figures.py` — not mock-ups.
 
-## System Architecture
+### 2.1 Pipeline throughput (per-topic measured rates)
 
+![Per-topic measured message rates from the real 90-min bag](docs/img/bag_overview.png)
+
+| Topic | Type | Messages | Measured rate |
+|-------|------|---------:|--------------:|
+| `/tf` | `tf2_msgs/TFMessage` | 215,000 | ~39.9 Hz |
+| `/odom` | `nav_msgs/Odometry` | 107,697 | ~20.0 Hz |
+| `/odometry/filtered` | `nav_msgs/Odometry` (EKF) | 107,302 | ~19.9 Hz |
+| `/imu/data` | `sensor_msgs/Imu` | 7,529 | ~1.4 Hz |
+| `/servo/position` | `std_msgs/Float32` | 7,529 | ~1.4 Hz |
+| `/tof/sensor_{0,1,2}` | `sensor_msgs/Range` | 7,529 each | ~1.4 Hz each |
+| `/scan` | `sensor_msgs/LaserScan` | 1,928 | ~0.36 Hz |
+| `/cmd_vel` | `geometry_msgs/Twist` | 30 | on demand |
+
+### 2.2 Scanning servo + ToF ranges (live sweep)
+
+![Servo sweep 96±60° and the three ToF beams' ranges during the sweep](docs/img/bag_tof_servo.png)
+
+The three VL53L1X beams (mount angles 180°/115°/0°) sweep with the servo; `inf` readings are out-of-range (no return within 4 m).
+
+### 2.3 One real assembled 360° scan
+
+![One real assembled 360-degree LaserScan, polar view](docs/img/bag_scan_polar.png)
+
+`scan_assembler` fuses the 3 beams + servo angle into a 360-bin `sensor_msgs/LaserScan` — this is what `slam_toolbox` consumes.
+
+### 2.4 IMU (bias-corrected, rotated to robot frame)
+
+![Gyro Z and accelerometer from the hardware session](docs/img/bag_imu.png)
+
+Firmware subtracts the calibrated gyro bias (Z = +0.0086 rad/s) and applies the rotation matrix (`robot_x = -sensor_z`, etc.) before publishing.
+
+### 2.5 Session evidence figure
+
+![Recorded session evidence — pipeline throughput and live ToF readings](docs/session_evidence.png)
+
+## 3. Simulation (Gazebo Harmonic) — Verified End-to-End
+
+The complete robot is simulated: Ackermann drive, steering, scanning servo head, 3 ToF beams, IMU, and a front camera — reusing the **real laptop stack unmodified** (`scan_assembler`, `slam_toolbox`, `robot_params.yaml`, static TFs).
+
+![Gazebo sim architecture — gz model/plugins through ros_gz_bridge to the reused laptop stack](docs/img/architecture_sim.png)
+
+### 3.1 Run it
+
+```bash
+# headless (EGL headless rendering via NVIDIA vendor lib, set automatically)
+ros2 launch driftbot_bringup sim.launch.py start_rviz:=false
+
+# drive it (separate terminal — gz drive latches the last cmd_vel,
+# always publish a zero Twist to stop)
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+    '{linear: {x: 0.2}, angular: {z: 0.0}}'
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
+    '{linear: {x: 0.0}, angular: {z: 0.0}}'   # STOP
+
+# or run the scripted end-to-end demo (drives, measures rates,
+# captures the SLAM map + trajectory, saves PGM/YAML + PNG)
+python3 scripts/sim_e2e_run.py
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           ESP32-S3 (Dual-Core Firmware)                           │
-│                                                                                  │
-│   Core 0 — Real-Time Control               Core 1 — Sensors + WiFi + ROS         │
-│   ┌──────────────────────────┐             ┌──────────────────────────────────┐  │
-│   │ Steering servo (MCPWM)   │             │ 3× VL53L1X ToF        (I2C 0)    │  │
-│   │ DC motor + H-bridge      │  ← data →  │ MPU6050 IMU           (I2C 1)    │  │
-│   │ Serial command handler   │             │ Scanning servo        (MCPWM 0)  │  │
-│   │                          │             │ micro-ROS WiFi UDP publishers    │  │
-│   └──────────────────────────┘             └──────────────────────────────────┘  │
-│                                                        │                          │
-└────────────────────────────────────────────────────────┼──────────────────────────┘
-                                                         │ WiFi UDP :8888
-                                                         ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                          Laptop (ROS2 Jazzy)                                     │
-│                                                                                  │
-│   micro-ROS Agent ──→ scan_assembler ──→ slam_toolbox ──→ /map                  │
-│                    ──→ robot_localization (EKF, optional)                        │
-│                    ──→ teleop / rviz / rosbag2 (.mcap)                           │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
 
-## Key Technical Features
+Add `record_bag:=true` for an `.mcap` recording (camera stream excluded — it floods the bag at ~83 MB/s).
 
-### Perception — 360° Rotating ToF Scanner
-- **3× VL53L1X** Time-of-Flight sensors mounted on a rotating triangular plate
-- Servo sweeps ±60° sinusoidally; calibrated mount angles give full 360° coverage
-- Custom `scan_assembler` node converts Range messages → `sensor_msgs/LaserScan`
-- Scans are recorded live to `.mcap` bags for replay and analysis
+### 3.2 Verified sim topology (all measured live)
 
-### State Estimation
-- **IMU** (MPU6050) on a dedicated I2C bus with rotation-matrix correction
-- **SLAM Toolbox** localizes using the sparse ToF scan
-- Wheel encoders are present but currently **disabled** due to wiring reliability; `odometry_node` can fall back to static identity odometry when encoders are off
-- Optional **EKF fusion** via `robot_localization`
+| gz topic | ROS topic | Rate | Notes |
+|---|---|---:|---|
+| `/model/driftbot/cmd_vel` | `/cmd_vel` | — | AckermannSteering (latches!) |
+| `/model/driftbot/odometry` | `/odom` | ~50 Hz | odom_tf → TF odom→base_link |
+| `/tof/sensor_{0,1,2}` (gpu_lidar) | `/tof/sensor_*_raw` → `/tof/sensor_*` | 10 Hz | 1-sample LaserScan → Range (tof_adapter) |
+| `/imu/data` | `/imu/data` | 10 Hz | frame_id `imu_link` |
+| `/camera/image_raw` | `/camera/image_raw` | 30 Hz | 1280×720 rgb8, `camera_link` |
+| `/scan_joint/cmd_pos` | `/scan_joint/cmd_pos` | — | JointPositionController (ABS mode, 3 rad/s) |
+| — | `/servo/position` | ~50 Hz | servo_sweep (96±60° sine) |
+| — | `/scan` | ~0.6 Hz | scan_assembler (360 bins) |
+| — | `/map`, `/pose` | ~0.5 Hz | slam_toolbox (lifecycle-activated) |
 
-### Embedded — Dual-Core Real-Time Architecture
-- **Core 0:** Motor control + steering + serial CLI — isolated from WiFi/I2C latency
-- **Core 1:** Sensor I/O, scanning servo, and micro-ROS publishing
-- **Two separate I2C buses:** `Wire` for ToF sensors, `Wire1` for the IMU (eliminates bus starvation)
-- MCPWM timers re-initialized after WiFi startup to recover from radio-induced timer corruption
-- XSHUT-based I2C address assignment for three identical VL53L1X sensors
+### 3.3 Real SLAM map from the sim
 
-### Communication — micro-ROS over WiFi
-- Sensor + telemetry topics published over UDP (measured ~1.4 Hz on-robot, see topic table)
-- Standard message types (`Range`, `Imu`, `LaserScan`)
-- One-command laptop startup via `bringup.launch.py`
+![SLAM occupancy grid captured from the live Gazebo run, with the driven odom trajectory overlaid](docs/img/slam_map_sim.png)
 
-## Hardware
+Captured by `scripts/sim_e2e_run.py` from a live run: **184×112 cells @ 5 cm (9.2×5.6 m)**, 1,478 occupied cells, 6.69 m driven over a 9-segment path (straights + arcs). The saved occupancy grid is in `docs/maps/sim_corridor_map.pgm` + `sim_corridor_map.yaml` (nav2 `map_server` format).
+
+### 3.4 Recorded sim session (464,533 messages)
+
+`bags/driftbot_sim_20260923_195933` (49.2 MB, 471 s, gitignored): `/cmd_vel` 8,785 · `/scan` 165 · `/map` 234 · `/tf` 33,654 · `/odom` 17,260 · `/servo/position` 17,263 · `/tof/sensor_*` 3,453 each · `/imu/data` 3,452 · SLAM `/pose` 25.
+
+### 3.5 Simulation gotchas solved (documented for reproducibility)
+
+- **Headless EGL**: gz sim needs `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` (Mesa EGL fails headless) — set in `sim.launch.py`.
+- **Invalid ROS topic name**: `JointPositionController`'s default topic `/model/<m>/joint/<j>/<idx>/cmd_pos` has a numeric token — `ros_gz_bridge` crashes on it. Fixed with a `<topic>/scan_joint/cmd_pos</topic>` override + `use_velocity_commands` ABS mode (`cmd_max` 3.0 rad/s, mirrors the real servo).
+- **slam_toolbox is a lifecycle node**: a plain `Node` launch leaves it unconfigured (never subscribes `/scan`). Both launch files now use `LifecycleNode` + configure/activate transitions — `ros2 lifecycle get /slam_toolbox` must report `active [3]`.
+- **gz AckermannSteering latches the last cmd_vel** — always publish a zero `Twist` to stop.
+
+## 4. Hardware
 
 | Component | Specification | Purpose |
 |-----------|---------------|---------|
-| ESP32-S3-DevKitC-1 | Dual-core 240MHz, WiFi | Main MCU |
-| 3× VL53L1X (TOF-400C) | 4m range, 940nm laser, I2C | Distance sensing |
+| ESP32-S3-DevKitC-1 | Dual-core 240 MHz, WiFi | Main MCU |
+| 3× VL53L1X (TOF-400C) | 4 m range, 940 nm, I2C | Distance sensing |
 | MPU6050 | 6-axis (accel + gyro), I2C | Orientation & motion |
-| 2× A3144 Hall Sensor | Unipolar, South-pole detect | Wheel odometry (disabled) |
-| 2× MG90S Servo | 180°, 50Hz PWM | Sensor sweep + steering |
-| BTS7960 H-bridge | 43A, dual PWM | DC motor control |
-| Ackermann chassis | 64mm wheels, 235mm wheelbase | Mobility |
+| 2× A3144 Hall sensor | Unipolar | Wheel odometry (disabled — wiring) |
+| 2× MG90S servo | 180°, 50 Hz PWM | Sensor sweep + steering |
+| BTS7960 H-bridge | 43 A, dual PWM | DC motor control |
+| Ackermann chassis | 64 mm wheels, 235 mm wheelbase | Mobility |
 
-### Wiring Summary
+### Wiring
 
 ```
-I2C bus 0 (Wire)   — GPIO 8 (SDA), GPIO 9  (SCL)  → 3× VL53L1X ToF
-I2C bus 1 (Wire1)  — GPIO 7 (SDA), GPIO 17 (SCL)  → MPU6050 IMU
-GPIO 4, 5, 6       — XSHUT → ToF sensor enable (address assignment)
-GPIO 18            — PWM → Scanning servo (sensor platform)
-GPIO 10            — PWM → Steering servo
-GPIO 11 / GPIO 12  — PWM → Motor H-bridge (forward / reverse)
-GPIO 15 / GPIO 16  — Enable → Motor H-bridge
-GPIO 13 / GPIO 14  — Interrupt → Hall encoders (currently disabled)
+I2C bus 0 (Wire)   — GPIO 8 (SDA), GPIO 9  (SCL)  → 3× VL53L1X ToF (0x30/0x31/0x32)
+I2C bus 1 (Wire1)  — GPIO 7 (SDA), GPIO 17 (SCL)  → MPU6050 IMU (ext. 4.7–10 kΩ pull-ups)
+GPIO 4, 5, 6       — XSHUT → ToF address assignment
+GPIO 18            — PWM → scanning servo (MCPWM Unit 0)
+GPIO 10            — PWM → steering servo (MCPWM Unit 1, Timer 0)
+GPIO 11 / 12       — PWM → motor H-bridge (MCPWM Unit 1, Timer 1)
+GPIO 15 / 16       — enable → motor H-bridge
+GPIO 13 / 14       — interrupt → Hall encoders (disabled)
 ```
 
-## Repository Structure
+### Calibrated constants (see `firmware/config/calibration_data.txt`)
+
+| Constant | Value |
+|---|---|
+| Servo center (scan) | 96° (plate rotated −6°) |
+| Steering center | 140° (1987 µs), range 125–155° |
+| ToF mount angles | 180° / 115° / 0° (CCW from forward) |
+| Gyro bias | X −0.0469, Y −0.0007, Z +0.0086 rad/s |
+| Motor PWM | min 35, max 200 |
+| IMU rotation | robot_x=−sensor_z, robot_y=sensor_y, robot_z=sensor_x |
+
+## 5. Quick Start
+
+### Real robot
+
+```bash
+# 1. flash firmware (WiFi credentials in firmware/config/secrets.h)
+cd firmware && pio run --target upload
+
+# 2. build the laptop workspace
+cd ros2_ws && colcon build && source install/setup.zsh
+
+# 3. one-command session (tmux: bringup + teleop + monitor + manual)
+./scripts/start_session.sh        # add --rviz for RViz2
+./scripts/stop_session.sh         # stop cleanly
+```
+
+### Simulation (no hardware needed)
+
+```bash
+cd ros2_ws && colcon build && source install/setup.zsh
+ros2 launch driftbot_bringup sim.launch.py start_rviz:=false   # add record_bag:=true to record
+python3 scripts/sim_e2e_run.py    # scripted drive + rate measurement + SLAM map capture
+```
+
+> Use `setup.zsh` (not `setup.bash`) under zsh — `setup.bash` breaks (`BASH_SOURCE` unresolved).
+
+### Regenerate the figures
+
+```bash
+source /opt/ros/jazzy/setup.zsh && source ros2_ws/install/setup.zsh
+python3 scripts/make_figures.py   # docs/img/bag_*.png from the hardware bag
+dot -Tpng docs/img/architecture_system.dot   -o docs/img/architecture_system.png
+dot -Tpng docs/img/architecture_firmware.dot -o docs/img/architecture_firmware.png
+dot -Tpng docs/img/architecture_sim.dot       -o docs/img/architecture_sim.png
+```
+
+## 6. Repository Structure
 
 ```
 ├── firmware/                    ESP32-S3 PlatformIO project
-│   ├── src/main.cpp             Dual-core entry point (FreeRTOS)
-│   ├── config/
-│   │   ├── pins.h               Central GPIO pin map
-│   │   ├── servo_config.h       Motion parameters
-│   │   ├── tof_config.h         Sensor timing & geometry
-│   │   ├── motor_config.h       Motor + steering limits
-│   │   ├── calibration_data.txt Calibrated hardware constants
-│   │   └── secrets.h            WiFi credentials (gitignored)
-│   ├── components/
-│   │   ├── servo/               Sinusoidal sweep driver
-│   │   ├── tof/                 VL53L1X multi-sensor driver
-│   │   ├── imu/                 MPU6050 with rotation matrix
-│   │   ├── encoder/             A3144 hall encoder with debounce (disabled)
-│   │   ├── motor/               DC motor + steering servo driver
-│   │   └── ros_bridge/          micro-ROS publisher abstraction
-│   ├── tests/                   Pin-diagnostics & hardware utilities
-│   ├── test/                    PlatformIO Unity test suite
-│   └── calibration/             Standalone calibration firmware
-│
-├── ros2_ws/src/driftbot_bringup/   Laptop-side ROS2 package
-│   ├── driftbot_bringup/
-│   │   ├── scan_assembler.py    ToF + servo → LaserScan (360°)
-│   │   ├── odometry_node.py     Ackermann rear-encoder odometry → Odometry
-│   │   └── topic_monitor.py     Live topic rate/value monitor
-│   ├── launch/
-│   │   ├── slam.launch.py       SLAM-only launch
-│   │   └── bringup.launch.py    One-command full laptop stack
-│   ├── config/
-│   │   ├── robot_params.yaml    Physical dimensions & sensor geometry
-│   │   ├── slam_toolbox.yaml    SLAM algorithm parameters
-│   │   ├── ekf.yaml             EKF fusion parameters
-│   │   └── bringup.yaml         Session-level bringup parameters
-│   └── scripts/
-│       └── start_session.sh     Tmux session orchestrator
-│
-├── scripts/
-│   └── start_session.sh         Fresh tmux test session
-├── docs/
-│   ├── plan.md                  Interview-ready fix plan
-│   └── maps/                    Generated occupancy-grid maps
-├── MEMORY.md                    Project facts / calibration decisions
-└── STATE.md                     Active work log
+│   ├── src/main.cpp             dual-core entry point (FreeRTOS)
+│   ├── config/                  pins.h, servo/tof/motor_config.h, calibration_data.txt
+│   ├── components/              servo, tof, imu, encoder, motor, ros_bridge
+│   └── test/                    PlatformIO Unity suite (13 tests)
+├── ros2_ws/src/driftbot_bringup/
+│   ├── driftbot_bringup/        scan_assembler, odometry_node, topic_monitor,
+│   │                            servo_sweep, tof_adapter, odom_tf (sim)
+│   ├── launch/                  bringup.launch.py (hardware), sim.launch.py (Gazebo)
+│   ├── config/                  robot_params.yaml, slam_toolbox.yaml, ekf.yaml, driftbot.rviz
+│   └── gz/                      models/driftbot/model.sdf, worlds/driftbot_corridor.sdf
+├── scripts/                     start_session.sh, stop_session.sh, make_figures.py,
+│                                plot_slam_map.py, sim_e2e_run.py
+├── docs/img/                    architecture + data figures (.dot sources + .png)
+├── docs/maps/                   saved SLAM occupancy grid (PGM + YAML)
+├── bags/                        recorded .mcap sessions (gitignored)
+├── docs/session_evidence.png    hardware-session evidence figure
+├── MEMORY.md / STATE.md        project facts / work log (gitignored)
 ```
 
-## ROS2 Topics
-
-Rates below are **measured** from the recorded 90-min session
-(`bags/driftbot_ground_20260828_184909`, message count ÷ duration), not nominal
-targets. The on-robot sensor topics settled around ~1.4 Hz in this run (limited
-by the ToF timing budget + WiFi transport), while laptop-side odometry/TF ran at
-~20/40 Hz.
-
-| Topic | Type | Measured rate | Source |
-|-------|------|--------------:|--------|
-| `/tf` | `tf2_msgs/TFMessage` | ~39.9 Hz | Laptop (TF tree) |
-| `/odom` | `nav_msgs/Odometry` | ~20.0 Hz | Laptop |
-| `/odometry/filtered` | `nav_msgs/Odometry` | ~19.9 Hz | robot_localization EKF |
-| `/imu/data` | `sensor_msgs/Imu` | ~1.4 Hz | ESP32 |
-| `/servo/position` | `std_msgs/Float32` | ~1.4 Hz | ESP32 |
-| `/tof/sensor_0..2` | `sensor_msgs/Range` | ~1.4 Hz each | ESP32 |
-| `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | ~1.0 Hz | Laptop |
-| `/scan` | `sensor_msgs/LaserScan` | ~0.36 Hz | Laptop (scan assembler) |
-| `/cmd_vel` | `geometry_msgs/Twist` | on demand | Teleop |
-
-> Encoder topics are present in firmware but were disabled in this session
-> (wiring reliability), so `/odometry/filtered` position stays near origin —
-> localization relied on scan-matching.
-
-## Quick Start
-
-### 1. Flash the robot
-
-```bash
-# Configure WiFi credentials
-cp firmware/config/secrets.h.template firmware/config/secrets.h
-# Edit secrets.h with your WiFi SSID, password, and laptop IP
-
-cd firmware && pio run --target upload
-```
-
-### 2. Build the laptop-side workspace
-
-```bash
-cd ros2_ws && colcon build --symlink-install
-source install/setup.bash
-```
-
-> If you also built the micro-ROS agent from source, source that workspace first:
-> `source microros_ws/install/setup.bash`
-
-### 3. Start a fresh test session
-
-```bash
-./scripts/start_session.sh
-```
-
-> Run this from a normal terminal, **not** from inside another tmux session. If you are already in tmux, detach first or run `unset TMUX` before the script.
-
-This creates a tmux session with four windows:
-
-| Window | Purpose |
-|---|---|
-| `bringup` | micro-ROS agent + SLAM + `.mcap` recorder |
-| `teleop`  | `teleop_twist_keyboard` — drive the robot with `i/k/j/l/,` |
-| `monitor` | Live topic rate/value monitor |
-| `manual`  | Spare shell for `ros2 topic …` commands |
-
-Stop everything cleanly:
-
-```bash
-./scripts/stop_session.sh
-```
-
-Attach later with: `tmux attach -t driftbot`
-
-### 4. Operate the robot
-
-Attach to the session:
-
-```bash
-tmux attach -t driftbot
-```
-
-Switch windows with `Ctrl-b` + window number:
-
-| Window | What to do |
-|---|---|
-| `1:bringup` | Leave running — agent, SLAM, bag recorder |
-| `2:teleop`  | Drive with keyboard (US layout). `i`=forward, `k`=stop, `,`=reverse, `j`=left, `l`=right. `q/z`=speed. `Ctrl-c`=quit. |
-| `3:monitor` | Watch live topic rates and last values |
-| `4:manual`  | Run ad-hoc commands, e.g. `ros2 topic echo /map` |
-
-To see the map live, start the session with RViz:
-
-```bash
-./scripts/start_session.sh --rviz
-```
-
-Or open RViz manually from the `manual` window:
-
-```bash
-rviz2 -d $(ros2 pkg prefix driftbot_bringup)/share/driftbot_bringup/config/driftbot.rviz
-```
-
-### 5. Save a map
-
-After driving around:
-
-```bash
-ros2 run nav2_map_server map_saver_cli -f docs/maps/corridor_map
-```
-
-### 6. Stop everything
-
-```bash
-./scripts/stop_session.sh
-```
-
-## Results
-
-| Metric | Value | Method |
-|--------|-------|--------|
-| micro-ROS transport | WiFi UDP :8888 | micro-ROS agent |
-| Servo scan rate | ~8–9 Hz / 360° sweep | `/servo/position` topic |
-| IMU publish rate | ~9 Hz | `/imu/data` topic |
-| Gyro drift (raw) | 29.6°/min | Static IMU test |
-| Gyro drift (corrected) | <1°/min | After bias subtraction |
-| ToF timing budget | 20 ms | `tof_config.h` |
-| Motor safety timeout | 1000 ms | Watchdog auto-stop |
-| SLAM map resolution | 5 cm/cell | `slam_toolbox.yaml` |
-| Wall material (test track) | Cardboard | Physical test setup |
-
-## Technical Decisions
+## 7. Technical Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Dual-core split | Core 0 handles real-time motor/steering; Core 1 handles sensors, WiFi, and ROS publishing |
-| Two I2C buses | IMU was unreliable on the loaded ToF bus; a dedicated `Wire1` bus eliminated stalls |
-| Sinusoidal scanning servo | Natural deceleration at endpoints — no mechanical shock, smooth reversal |
-| MCPWM re-init after WiFi | Radio startup can corrupt MCPWM timers; re-initializing restores PWM outputs |
-| XSHUT address assignment | Allows three identical VL53L1X sensors on the same bus |
-| Encoders disabled | Wiring reliability issue on one encoder; code falls back to scan-matching localization |
-| WiFi UDP (not Serial) | Decouples robot from tether; enables fully untethered tests |
-| Rotation matrix in firmware | Offloads sensor-frame correction to MCU; laptop receives REP-103-standard data |
+| Dual-core split | Core 0 real-time motor/steering; Core 1 sensors + WiFi + ROS — WiFi latency cannot starve PWM |
+| Two I2C buses | MPU6050 NACKed on the loaded ToF bus; dedicated `Wire1` (GPIO 7/17) fixed it |
+| Sinusoidal scan sweep | Natural deceleration at sweep endpoints — no mechanical shock |
+| MCPWM re-init after WiFi | Radio startup corrupts MCPWM timers; re-init restores PWM |
+| XSHUT address assignment | Three identical VL53L1X on one bus (0x30/0x31/0x32) |
+| Encoders disabled | One encoder unreliable; localization falls back to scan-matching |
+| micro-ROS over WiFi UDP | Untethered robot; 7 topics at ~1.4 Hz sustained |
+| gz-native plugins (no ros2_control) | No sudo to install ros-jazzy-ros2-controllers; AckermannSteering + JointPositionController suffice |
+| gpu_lidar for ToF | gz-sim8 has no `rangefinder`; 1×1-sample gpu_lidar emits `sensor_msgs/LaserScan` |
+| LifecycleNode for slam_toolbox | plain Node launch leaves it unconfigured — latent bug fixed in BOTH launch files |
+| Camera excluded from bag recorder | 1280×720 rgb8 @ 30 Hz ≈ 83 MB/s flooded a 4-min test bag to 121 GB |
 
-## Skills Demonstrated
+## 8. Skills Demonstrated
 
-- **Embedded C++** — PlatformIO, FreeRTOS tasks, hardware interrupts, I2C drivers
-- **ROS2** — micro-ROS, custom nodes, TF tree, launch files, parameter management
-- **Sensor Fusion** — wheel odometry + IMU + EKF (robot_localization)
-- **SLAM** — scan assembly from sparse ToF data, slam_toolbox integration
-- **Real-Time Systems** — dual-core scheduling, interrupt-safe shared data
-- **Hardware-Software Co-Design** — pull-up sizing, decoupling caps, debounce tuning
-- **Signal Integrity** — I2C bus noise mitigation (capacitors, timeouts, retries)
-- **Kinematics** — Ackermann steering model, sinusoidal motion planning, coordinate transforms
+- **Embedded C++** — PlatformIO, FreeRTOS dual-core tasks, MCPWM, I2C, micro-ROS client
+- **ROS2 Jazzy** — custom nodes, lifecycle nodes, ros_gz_bridge, TF tree, rosbag2 mcap
+- **Gazebo Harmonic** — SDF models, world, AckermannSteering/JointPositionController/Sensors systems, headless EGL
+- **SLAM** — slam_toolbox async mode from a 3-beam rotating ToF scan
+- **Sensor fusion** — scan assembly, optional EKF (robot_localization), IMU bias/rotation correction
+- **Real-time systems** — ISR-safe IRAM_ATTR handlers, watchdogs, debounce, dual-core cache constraints
+- **Signal integrity** — I2C bus isolation, pull-up sizing, power-ramp hardening
 
 ## Dependencies
 
-**Firmware:** PlatformIO, ESP32Servo, Pololu VL53L1X, micro-ROS
-
-**Laptop:** ROS2 Jazzy, slam_toolbox, robot_localization, tf2_ros
+**Firmware:** PlatformIO, ESP-IDF, micro-ROS, VL53L1X, MPU6050
+**Laptop:** ROS2 Jazzy, slam_toolbox, robot_localization, ros_gz_bridge, ros_gz_sim, Gazebo Harmonic 8.x
+**Figures:** matplotlib, graphviz (`dot`), rosbag2_py
 
 ## License
 
