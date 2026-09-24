@@ -1,0 +1,119 @@
+# CI — runs on every push and pull request
+#
+# 1. Firmware host unit tests (12 tests, no hardware): pio test -e native
+# 2. ESP32-S3 firmware compile check: pio run -e esp32s3
+#    (builds the real firmware image; the on-hardware HIL suite
+#     test_robot needs the physical robot and is NOT run in CI)
+# 3. ROS2 workspace: colcon build, Python syntax check on all nodes /
+#    launch files / scripts, config YAML validation, package + launch
+#    integration checks (ros2 pkg list, node module imports,
+#    launch --show-args) inside the ros:jazzy container.
+#
+# The Gazebo sim / SLAM end-to-end run needs a GPU + gz-sim and stays
+# out of CI; see README section 3 for its verified local results.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  firmware-unit-tests:
+    name: Firmware unit tests (host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Run host unit tests (test_unit_logic, 12 tests)
+        working-directory: firmware
+        run: pio test -e native
+
+  firmware-esp32s3-build:
+    name: ESP32-S3 firmware build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60   # first run builds micro-ROS XRCE-DDS agent from source
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ESP32-S3 firmware (esp32s3 env)
+        working-directory: firmware
+        run: pio run -e esp32s3
+
+  ros2-build:
+    name: ROS2 workspace build + checks
+    runs-on: ubuntu-latest
+    container: ros:jazzy
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install colcon + PyYAML
+        run: |
+          apt-get update
+          apt-get install -y python3-colcon-common-extensions python3-yaml
+
+      - name: Python syntax check (nodes, launch files, scripts)
+        run: |
+          find ros2_ws/src/driftbot_bringup scripts -name '*.py' -print0 \
+            | xargs -0 python3 -m py_compile
+          echo "PY SYNTAX OK"
+
+      - name: Parse all ROS2 config YAML
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, yaml
+          files = sorted(glob.glob('ros2_ws/src/driftbot_bringup/config/*.yaml'))
+          assert files, "no config YAML found"
+          for f in files:
+              with open(f) as fh:
+                  yaml.safe_load(fh)
+              print("YAML OK ", f)
+          print("ALL CONFIG YAML PARSE OK")
+          EOF
+
+      - name: colcon build (driftbot_bringup)
+        working-directory: ros2_ws
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          colcon build --packages-select driftbot_bringup
+
+      - name: Package + node + launch integration checks
+        working-directory: ros2_ws
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          . install/setup.sh
+          # package is installed and registered in the ament index
+          ros2 pkg list | grep -x driftbot_bringup
+          # every node module imports cleanly (catches broken imports/deps)
+          python3 - <<'EOF'
+          import driftbot_bringup.scan_assembler
+          import driftbot_bringup.odometry_node
+          import driftbot_bringup.topic_monitor
+          import driftbot_bringup.servo_sweep
+          import driftbot_bringup.tof_adapter
+          import driftbot_bringup.odom_tf
+          print("ALL NODE MODULES IMPORT OK")
+          EOF
+          # both launch files evaluate (nodes, lifecycle handlers, config paths)
+          ros2 launch driftbot_bringup bringup.launch.py --show-args > /dev/null
+          ros2 launch driftbot_bringup sim.launch.py --show-args > /dev/null
+          echo "LAUNCH FILES OK"

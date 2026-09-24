@@ -1,8 +1,10 @@
-# DriftBot — Autonomous Ground Robot with 360° ToF SLAM (ROS2)
+# DriftBot — Ground Robot with 360° Scanning-ToF SLAM (ROS2)
 
-A from-scratch autonomous ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP for real-time SLAM — and the entire robot is **simulated in Gazebo Harmonic** with a matching sensor suite for reproducible, hardware-free runs.
+A from-scratch ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP for real-time SLAM — and the entire robot is **simulated in Gazebo Harmonic** with a matching sensor suite for reproducible, hardware-free runs.
 
-**Built to demonstrate:** full-stack robotics — embedded firmware, sensor fusion, state estimation, real-time control, ROS2 integration, and simulation.
+**Built to demonstrate:** full-stack robotics — embedded firmware, sensor integration with optional EKF, state estimation, real-time control, ROS2 integration, and simulation.
+
+**Evidence at a glance:** CI runs on every push (firmware host tests + ESP32-S3 build + ROS2 colcon build + launch/config checks) · 12/12 firmware unit tests pass (`pio test -e native`) · ESP32-S3 firmware builds clean · 90-min hardware bag (475k msgs) · verified end-to-end sim run (6.69 m driven, SLAM map 184×112 cells, 464k-msg bag) · every figure in this README comes from a recorded session.
 
 ---
 
@@ -176,6 +178,22 @@ python3 scripts/sim_e2e_run.py    # scripted drive + rate measurement + SLAM map
 
 > Use `setup.zsh` (not `setup.bash`) under zsh — `setup.bash` breaks (`BASH_SOURCE` unresolved).
 
+### Tests / CI
+
+```bash
+# Host firmware unit tests (12 tests, no hardware)
+cd firmware && pio test -e native
+
+# ESP32-S3 firmware compile check (and on-hardware tests with the robot)
+cd firmware && pio run -e esp32s3          # build only
+cd firmware && pio test -e esp32s3         # on-hardware HIL suite (13 tests)
+
+# ROS2 workspace build
+cd ros2_ws && colcon build
+```
+
+GitHub Actions runs these on every push/PR (`.github/workflows/ci.yml`): firmware native tests, ESP32-S3 build, ROS2 colcon build + launch/config checks, Python lint of all nodes and scripts.
+
 ### Regenerate the figures
 
 ```bash
@@ -193,7 +211,7 @@ dot -Tpng docs/img/architecture_sim.dot       -o docs/img/architecture_sim.png
 │   ├── src/main.cpp             dual-core entry point (FreeRTOS)
 │   ├── config/                  pins.h, servo/tof/motor_config.h, calibration_data.txt
 │   ├── components/              servo, tof, imu, encoder, motor, ros_bridge
-│   └── test/                    PlatformIO Unity suite (13 tests)
+│   └── test/                    PlatformIO Unity tests (12 host tests: test_unit_logic; 13 on-hardware: test_robot)
 ├── ros2_ws/src/driftbot_bringup/
 │   ├── driftbot_bringup/        scan_assembler, odometry_node, topic_monitor,
 │   │                            servo_sweep, tof_adapter, odom_tf (sim)
@@ -231,9 +249,15 @@ dot -Tpng docs/img/architecture_sim.dot       -o docs/img/architecture_sim.png
 - **ROS2 Jazzy** — custom nodes, lifecycle nodes, ros_gz_bridge, TF tree, rosbag2 mcap
 - **Gazebo Harmonic** — SDF models, world, AckermannSteering/JointPositionController/Sensors systems, headless EGL
 - **SLAM** — slam_toolbox async mode from a 3-beam rotating ToF scan
-- **Sensor fusion** — scan assembly, optional EKF (robot_localization), IMU bias/rotation correction
+- **Sensor integration** — scan assembly, optional EKF (robot_localization), IMU bias/rotation correction
 - **Real-time systems** — ISR-safe IRAM_ATTR handlers, watchdogs, debounce, dual-core cache constraints
 - **Signal integrity** — I2C bus isolation, pull-up sizing, power-ramp hardening
+
+## Limitations (current scope)
+
+- **No planner / Nav2** — the robot is teleoperated (`/cmd_vel`); the autonomy stack ends at SLAM map building. Nothing here claims autonomous navigation.
+- **End-to-end SLAM evidence is simulation-based.** The Gazebo run (6.69 m driven, 184×112-cell map, 464k-msg bag) is the verified full-pipeline evidence. The 90-min hardware bag (475k msgs) shows the sensor pipeline publishing live data on the real robot, but wheel encoders are disabled (wiring), so on-hardware odometry is static-identity and SLAM localization on hardware is scan-match only — not yet verified as a completed end-to-end map.
+- **On-hardware `pio test -e esp32s3`** (13 Unity tests) passed on 2026-08-28 with the robot on the bench; it needs the physical robot and is therefore not part of CI. CI runs the 12 host tests (`test_unit_logic`) plus the ESP32-S3 build.
 
 ## Dependencies
 
