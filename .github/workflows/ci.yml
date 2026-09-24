@@ -51,8 +51,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install PlatformIO
-        run: pip install platformio
+      - name: Install PlatformIO + colcon
+        run: pip install platformio colcon-common-extensions
+
+      # micro_ros_platformio builds its ament dev dependencies by sourcing
+      # ~/.platformio/penv/bin/activate and running colcon there. The official
+      # PlatformIO installer creates that penv (with empy); a pip-installed
+      # platformio does not, so create it here. The activated penv python is
+      # used by the ament builds, so it needs empy + catkin_pkg too
+      # (colcon itself is found on the system PATH after activation).
+      - name: Create PlatformIO private env (micro-ROS dev build needs it)
+        run: |
+          python -m venv "$HOME/.platformio/penv"
+          "$HOME/.platformio/penv/bin/pip" install empy==3.3.4 catkin_pkg setuptools
 
       - name: Build ESP32-S3 firmware (esp32s3 env)
         working-directory: firmware
