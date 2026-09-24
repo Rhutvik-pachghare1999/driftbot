@@ -33,16 +33,21 @@ from datetime import datetime
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    EmitEvent,
     ExecuteProcess,
     GroupAction,
     RegisterEventHandler,
     TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
-from launch.event_handlers import OnProcessExit
+from launch.event_handlers import OnProcessExit, OnProcessStart
+from launch.events import matches_action
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
@@ -201,12 +206,43 @@ def generate_launch_description():
     )
 
     # ── 5. SLAM ───────────────────────────────────────────────────────────────
-    slam_toolbox = Node(
+    # async_slam_toolbox_node is a LIFECYCLE node: a plain Node launch
+    # leaves it unconfigured (never subscribes to /scan). Use LifecycleNode
+    # + configure/activate transitions, per slam_toolbox's own launch files.
+    slam_toolbox = LifecycleNode(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
-        parameters=[slam_params],
+        namespace='',
         output='screen',
+        parameters=[slam_params],
+    )
+
+    slam_configure = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(slam_toolbox),
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        )
+    )
+    slam_activate = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(slam_toolbox),
+            transition_id=Transition.TRANSITION_ACTIVATE,
+        )
+    )
+    slam_on_start = RegisterEventHandler(
+        OnProcessStart(
+            target_action=slam_toolbox,
+            on_start=[slam_configure],
+        )
+    )
+    slam_on_configured = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=slam_toolbox,
+            start_state='configuring',
+            goal_state='inactive',
+            entities=[slam_activate],
+        )
     )
 
     # ── 6. Teleoperation ──────────────────────────────────────────────────────
@@ -285,6 +321,8 @@ def generate_launch_description():
         ekf_node,
         scan_assembler,
         slam_toolbox,
+        slam_on_start,
+        slam_on_configured,
         teleop_node,
         rviz_node,
         recorder_enabled,
