@@ -6,7 +6,7 @@ A from-scratch ground robot featuring a custom rotating ToF sensor array for 360
 
 **Built to demonstrate:** full-stack robotics — embedded firmware, sensor integration with optional EKF, state estimation, real-time control, ROS2 integration, and simulation.
 
-**Evidence at a glance:** CI runs on every push (firmware host tests + ESP32-S3 build + ROS2 colcon build + launch/config checks) · 12/12 firmware unit tests pass (`pio test -e native`) · ESP32-S3 firmware builds clean · 90-min hardware bag (475k msgs) · verified end-to-end sim run (6.69 m driven, SLAM map 184×112 cells, 464k-msg bag) · every figure in this README comes from a recorded session.
+**Evidence at a glance:** CI runs on every push (firmware host tests + ESP32-S3 build + ROS2 colcon build + launch/config checks) · 12/12 firmware unit tests pass (`pio test -e native`) · ESP32-S3 firmware builds clean · 90-min hardware bag (475k msgs) · **verified end-to-end sim run (6.66 m driven, SLAM map 170×79 cells, IoU=0.078, Wall RMSE=0.87m, 464k-msg bag)** · every figure in this README comes from a recorded session.
 
 ---
 
@@ -92,20 +92,39 @@ Add `record_bag:=true` for an `.mcap` recording (camera stream excluded — it f
 | gz topic | ROS topic | Rate | Notes |
 |---|---|---:|---|
 | `/model/driftbot/cmd_vel` | `/cmd_vel` | — | AckermannSteering (latches!) |
-| `/model/driftbot/odometry` | `/odom` | ~50 Hz | odom_tf → TF odom→base_link |
+| `/model/driftbot/odometry` | `/odom` | ~47 Hz | odom_tf → TF odom→base_link |
 | `/tof/sensor_{0,1,2}` (gpu_lidar) | `/tof/sensor_*_raw` → `/tof/sensor_*` | 10 Hz | 1-sample LaserScan → Range (tof_adapter) |
 | `/imu/data` | `/imu/data` | 10 Hz | frame_id `imu_link` |
 | `/camera/image_raw` | `/camera/image_raw` | 30 Hz | 1280×720 rgb8, `camera_link` |
 | `/scan_joint/cmd_pos` | `/scan_joint/cmd_pos` | — | JointPositionController (ABS mode, 3 rad/s) |
-| — | `/servo/position` | ~50 Hz | servo_sweep (96±60° sine) |
-| — | `/scan` | ~0.6 Hz | scan_assembler (360 bins) |
-| — | `/map`, `/pose` | ~0.5 Hz | slam_toolbox (lifecycle-activated) |
+| — | `/servo/position` | ~49 Hz | servo_sweep (96±60° sine) |
+| — | `/scan` | **0.4 Hz** | scan_assembler (360 bins, correct metadata) |
+| — | `/map`, `/pose` | 0.4 Hz | slam_toolbox (lifecycle-activated) |
+
+**Key `/scan` metadata (verified live):**
+- `angle_min` = 0.0, `angle_max` = 2π − `angle_increment` (not 2π)
+- `angle_increment` = 2π/360 ≈ 0.01745 rad (1°)
+- `time_increment` = sweep_duration / 360 ≈ 5.8 ms
+- `scan_time` = actual sweep duration (~2.1 s)
 
 ### 3.3 Real SLAM map from the sim
 
 ![SLAM occupancy grid captured from the live Gazebo run, with the driven odom trajectory overlaid](docs/img/slam_map_sim.png)
 
-Captured by `scripts/sim_e2e_run.py` from a live run: **184×112 cells @ 5 cm (9.2×5.6 m)**, 1,478 occupied cells, 6.69 m driven over a 9-segment path (straights + arcs). The saved occupancy grid is in `docs/maps/sim_corridor_map.pgm` + `sim_corridor_map.yaml` (nav2 `map_server` format).
+Captured by `scripts/sim_e2e_run.py` from a live run: **170×79 cells @ 5 cm (8.5×4.0 m)**, 532 occupied cells, 6.66 m driven over a 9-segment path (straights + arcs). The saved occupancy grid is in `docs/maps/sim_corridor_map.pgm` + `sim_corridor_map.yaml` (nav2 `map_server` format).
+
+### 3.3.1 Ground-truth map comparison (quantitative validation)
+
+| Metric | Value | Notes |
+|---|---:|---|
+| **IoU (occupied cells)** | **0.078** | SLAM occupied vs. ground-truth walls |
+| **Wall RMSE** | **0.87 m** | Mean distance from SLAM occupied cells to nearest GT wall cell |
+| Map size | 170×79 cells | 8.5×4.0 m @ 5 cm/cell |
+| Occupied / free / unknown | 532 / 3,851 / 9,047 | 5 cm resolution |
+| Path driven | 6.66 m | 9 segments, 52 s, 3,117 odom samples |
+| SLAM map rate | 0.4 Hz | Full sweep = 2 direction changes |
+
+*Ground truth: 8.6 m corridor, walls at y = ±1.25 m, 0.1 m wall thickness. IoU is low because SLAM map includes free-space and noise; RMSE reflects angular smearing from 10 Hz ToF / 50 Hz servo mismatch — baseline for future improvements.*
 
 ### 3.4 Recorded sim session (464,533 messages)
 
@@ -117,6 +136,10 @@ Captured by `scripts/sim_e2e_run.py` from a live run: **184×112 cells @ 5 cm (9
 - **Invalid ROS topic name**: `JointPositionController`'s default topic `/model/<m>/joint/<j>/<idx>/cmd_pos` has a numeric token — `ros_gz_bridge` crashes on it. Fixed with a `<topic>/scan_joint/cmd_pos</topic>` override + `use_velocity_commands` ABS mode (`cmd_max` 3.0 rad/s, mirrors the real servo).
 - **slam_toolbox is a lifecycle node**: a plain `Node` launch leaves it unconfigured (never subscribes `/scan`). Both launch files now use `LifecycleNode` + configure/activate transitions — `ros2 lifecycle get /slam_toolbox` must report `active [3]`.
 - **gz AckermannSteering latches the last cmd_vel** — always publish a zero `Twist` to stop.
+- **Stale ToF readings → phantom obstacles**: `tof_adapter` now publishes `NaN` for no-return; `scan_assembler` checks `isfinite()` and tracks per-sensor timestamps, invalidating readings older than 0.2 s.
+- **Commanded vs. actual servo angle**: `scan_assembler` subscribes to Gazebo joint state (`/scan_joint/state`) when available; falls back to commanded angle with first-order lag filter (τ=0.15 s) matching the 3 rad/s max joint velocity.
+- **Sensor origin geometry**: Each ToF beam originates 5 cm from the scan-head center; `scan_assembler` adds the offset along the beam direction before binning.
+- **LaserScan metadata correctness**: `angle_max = 2π − angle_increment` (not 2π), `time_increment = sweep_duration / num_bins`, `scan_time = actual sweep duration` — verified live.
 
 ## 4. Hardware
 
