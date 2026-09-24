@@ -59,13 +59,6 @@ class TofAdapter(Node):
         if not msg.ranges:
             return
 
-        rng = msg.ranges[0]
-        if not math.isfinite(rng):
-            # No return within sensor range — publish 0.0 (no reading),
-            # matching the real firmware's out-of-range behavior.
-            rng = 0.0
-        rng = min(max(rng, 0.0), self.range_max)
-
         out = Range()
         out.header.stamp = msg.header.stamp
         out.header.frame_id = self.frame_id
@@ -73,7 +66,14 @@ class TofAdapter(Node):
         out.field_of_view = self.fov
         out.min_range = self.range_min
         out.max_range = self.range_max
-        out.range = rng
+
+        if not msg.ranges or not math.isfinite(msg.ranges[0]):
+            out.range = float('nan')
+        else:
+            rng = msg.ranges[0]
+            rng = min(max(rng, 0.0), self.range_max)
+            out.range = rng
+
         self.pubs[idx].publish(out)
 
 

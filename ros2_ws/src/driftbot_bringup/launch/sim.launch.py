@@ -121,7 +121,7 @@ def generate_launch_description():
     )
 
     # ── 2. ros_gz_bridge ──────────────────────────────────────────────────────
-    # gz -> ROS: odometry, ToF LaserScans (remapped to _raw), IMU, clock
+    # gz -> ROS: odometry, ToF LaserScans (remapped to _raw), IMU, clock, joint state
     # ROS -> gz: cmd_vel (remapped from /cmd_vel), scan head joint position
     bridge = Node(
         package='ros_gz_bridge',
@@ -138,6 +138,8 @@ def generate_launch_description():
             # JointPositionController uses a custom <topic> in model.sdf
             # (default topic has a numeric token, invalid in ROS).
             '/scan_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
+            # gz -> ROS: scan joint state (actual position from Gazebo)
+            '/model/driftbot/joint/scan_joint/state@sensor_msgs/msg/JointState[gz.msgs.JointState',
             # gz -> ROS: ToF beams (single-sample LaserScans)
             '/tof/sensor_0@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             '/tof/sensor_1@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
@@ -153,6 +155,7 @@ def generate_launch_description():
             # ROS side names: real-robot topic names
             ('/model/driftbot/cmd_vel', '/cmd_vel'),
             ('/model/driftbot/odometry', '/odom'),
+            ('/model/driftbot/joint/scan_joint/state', '/scan_joint/state'),
             # ToF LaserScans go to _raw; tof_adapter publishes the real
             # sensor_msgs/Range topics on /tof/sensor_{0,1,2}.
             ('/tof/sensor_0', '/tof/sensor_0_raw'),
