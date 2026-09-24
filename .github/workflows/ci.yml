@@ -67,6 +67,10 @@ jobs:
           python -m venv "$HOME/.platformio/penv"
           "$HOME/.platformio/penv/bin/pip" install empy==3.3.4 catkin_pkg lark-parser pyyaml setuptools
 
+      - name: Create placeholder secrets.h (real one is gitignored; CI only compiles, never flashes)
+        working-directory: firmware
+        run: cp config/secrets.h.template config/secrets.h
+
       - name: Build ESP32-S3 firmware (esp32s3 env)
         working-directory: firmware
         run: pio run -e esp32s3
