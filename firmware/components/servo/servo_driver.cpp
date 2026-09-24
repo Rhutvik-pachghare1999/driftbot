@@ -13,6 +13,7 @@
 #include "pins.h"
 #include "servo_config.h"
 #include "servo_driver.h"
+#include "driftbot_math.h"
 
 // ── Motion modes ──────────────────────────────────────────────────────────────
 enum ServoMode { MODE_IDLE, MODE_SINE, MODE_HOLD };
@@ -28,9 +29,7 @@ static unsigned long last_update = 0;
 
 // ── MCPWM write ───────────────────────────────────────────────────────────────
 static float clamp_deg(float deg) {
-    if (deg < (float)SERVO_LIMIT_MIN) return (float)SERVO_LIMIT_MIN;
-    if (deg > (float)SERVO_LIMIT_MAX) return (float)SERVO_LIMIT_MAX;
-    return deg;
+    return db_servo_clamp_deg(deg);
 }
 
 static int last_written_deg = -1;
@@ -39,7 +38,7 @@ static void write_servo(float deg) {
     current_deg = clamp_deg(deg);
     int int_deg = (int)(current_deg + 0.5f);
     if (int_deg != last_written_deg) {
-        float pulse_us = SERVO_PULSE_MIN_US + (float)int_deg * (SERVO_PULSE_MAX_US - SERVO_PULSE_MIN_US) / 180.0f;
+        float pulse_us = db_servo_pulse_us(int_deg);
         float duty = pulse_us / 20000.0f * 100.0f;
         mcpwm_set_duty(MCPWM_UNIT_0, MCPWM_TIMER_0, MCPWM_OPR_A, duty);
         last_written_deg = int_deg;
@@ -80,7 +79,7 @@ void servo_update() {
     phase += speed * dt;
     if (phase > 2.0f * PI) phase -= 2.0f * PI;
 
-    float target = center + amplitude * sinf(phase);
+    float target = db_servo_sweep_deg(center, amplitude, phase);
     write_servo(target);
 }
 

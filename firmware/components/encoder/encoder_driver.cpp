@@ -15,6 +15,7 @@
 #include "pins.h"
 #include "motor_driver.h"
 #include "encoder_driver.h"
+#include "driftbot_math.h"
 
 // ── Raw tick counters (ISR only increments, never decrements) ─────────────
 static volatile uint32_t raw_left  = 0;
@@ -50,21 +51,14 @@ static void IRAM_ATTR isr_right() {
 }
 
 // ── Update signed counts using motor direction ────────────────────────────
+// (db_encoder_delta_signed in driftbot_math.h — shared with the unit tests)
 static void update_signed() {
     uint32_t cur_left = raw_left;
     uint32_t cur_right = raw_right;
 
-    uint32_t delta_left  = cur_left - prev_raw_left;
-    uint32_t delta_right = cur_right - prev_raw_right;
-
     int8_t dir = motor_get_direction();
-    if (dir >= 0) {
-        signed_left  += (int32_t)delta_left;
-        signed_right += (int32_t)delta_right;
-    } else {
-        signed_left  -= (int32_t)delta_left;
-        signed_right -= (int32_t)delta_right;
-    }
+    signed_left  += db_encoder_delta_signed(cur_left, prev_raw_left, dir);
+    signed_right += db_encoder_delta_signed(cur_right, prev_raw_right, dir);
 
     prev_raw_left = cur_left;
     prev_raw_right = cur_right;

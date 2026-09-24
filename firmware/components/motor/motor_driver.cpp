@@ -14,6 +14,7 @@
 #include "pins.h"
 #include "motor_config.h"
 #include "motor_driver.h"
+#include "driftbot_math.h"
 
 // ── State ─────────────────────────────────────────────────────────────────
 static int  current_steer   = STEER_CENTER;
@@ -48,7 +49,7 @@ void motor_update_steering_hw() {
     if (angle < 0) angle = 0;
     if (angle > 180) angle = 180;
     last_steer_written = angle;
-    uint32_t pulse_us = 544 + (uint32_t)angle * 1856 / 180;
+    uint32_t pulse_us = db_steer_pulse_us(angle);
     mcpwm_set_duty_in_us(MCPWM_UNIT_1, MCPWM_TIMER_0, MCPWM_OPR_A, pulse_us);
 }
 
@@ -119,7 +120,7 @@ void motor_init() {
     mcpwm_set_duty_type(MCPWM_UNIT_1, MCPWM_TIMER_0, MCPWM_OPR_A, MCPWM_DUTY_MODE_0);
     steer_target = STEER_CENTER;
     last_steer_written = -1;
-    uint32_t center_us = 544 + (uint32_t)STEER_CENTER * 1856 / 180;
+    uint32_t center_us = db_steer_pulse_us(STEER_CENTER);
     mcpwm_set_duty_in_us(MCPWM_UNIT_1, MCPWM_TIMER_0, MCPWM_OPR_A, center_us);
     current_steer = STEER_CENTER;
 
@@ -131,23 +132,15 @@ void motor_init() {
 // ═══════════════════════════════════════════════════════════════════════════════
 void motor_set_speed(float speed_normalized) {
     last_cmd_time = millis();
-    if (speed_normalized > 1.0f) speed_normalized = 1.0f;
-    if (speed_normalized < -1.0f) speed_normalized = -1.0f;
-
-    bool forward = (speed_normalized >= 0);
-    float abs_speed = fabsf(speed_normalized);
-    if (abs_speed < 0.05f) { apply_motor(0, true); return; }
-
-    int pwm = (int)(MOTOR_MIN_USEFUL + abs_speed * (MOTOR_MAX - MOTOR_MIN_USEFUL));
+    bool forward = true;
+    int pwm = db_motor_pwm_from_speed(speed_normalized, &forward);
     apply_motor(pwm, forward);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 void motor_set_steering(int angle_deg) {
     last_cmd_time = millis();
-    if (angle_deg < STEER_MIN) angle_deg = STEER_MIN;
-    if (angle_deg > STEER_MAX) angle_deg = STEER_MAX;
-    current_steer = angle_deg;
+    current_steer = db_steer_clamp(angle_deg);
     steer_write_raw(current_steer);
 }
 
@@ -168,23 +161,15 @@ void motor_cmd_vel(float linear_x, float angular_z) {
 
     // Only update steering if angular command given
     if (fabsf(angular_z) > 0.01f) {
-        float steer_norm = angular_z / MAX_TURN_RATE;
-        if (steer_norm > 1.0f) steer_norm = 1.0f;
-        if (steer_norm < -1.0f) steer_norm = -1.0f;
-
-        int steer_angle;
-        if (steer_norm >= 0) {
-            steer_angle = STEER_CENTER + (int)(steer_norm * (STEER_MAX - STEER_CENTER));
-        } else {
-            steer_angle = STEER_CENTER + (int)(steer_norm * (STEER_CENTER - STEER_MIN));
-        }
+        int steer_angle = db_steer_angle_from_angular_z(angular_z);
         motor_set_steering(steer_angle);
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 void motor_update() {
-    if (watchdog_enabled && motor_active && (millis() - last_cmd_time > WATCHDOG_TIMEOUT_MS)) {
+    if (watchdog_enabled && motor_active &&
+        db_watchdog_expired(millis(), last_cmd_time, WATCHDOG_TIMEOUT_MS)) {
         apply_motor(0, true);
         watchdog_enabled = false;
         Serial.println("[MOTOR] cmd_vel timeout — motor stopped.");

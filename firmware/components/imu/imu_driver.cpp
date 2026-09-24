@@ -19,6 +19,7 @@
 #include <Wire.h>
 #include "pins.h"
 #include "imu_driver.h"
+#include "driftbot_math.h"
 
 // ── MPU6050 I2C Address ───────────────────────────────────────────────────────
 // Default 0x68 (AD0 pin LOW). If AD0 is HIGH, address becomes 0x69.
@@ -36,10 +37,10 @@ static uint8_t mpu_addr = MPU6050_ADDR_DEFAULT;
 #define REG_WHO_AM_I        0x75
 
 // ── Conversion factors ────────────────────────────────────────────────────────
-// ±2g range:   raw / 16384.0 = g, then × 9.81 = m/s²
-#define ACCEL_SCALE  (9.81f / 16384.0f)
-// ±500°/s range: raw / 65.5 = °/s, then × π/180 = rad/s
-#define GYRO_SCALE   (1.0f / 65.5f * 0.017453f)
+// Defined in driftbot_math.h (DB_ACCEL_SCALE / DB_GYRO_SCALE) — shared with
+// the host unit tests (pio test -e native).
+#define ACCEL_SCALE  DB_ACCEL_SCALE   // ±2g range: raw/16384 = g -> m/s²
+#define GYRO_SCALE   DB_GYRO_SCALE    // ±500°/s range: raw/65.5 = °/s -> rad/s
 
 // ── State ─────────────────────────────────────────────────────────────────────
 static ImuData current_data = {0};
@@ -219,13 +220,13 @@ void imu_update() {
     int16_t gy = (Wire1.read() << 8) | Wire1.read();
     int16_t gz = (Wire1.read() << 8) | Wire1.read();
 
-    // Convert to SI units
-    float new_ax = ax * ACCEL_SCALE;  // m/s²
-    float new_ay = ay * ACCEL_SCALE;
-    float new_az = az * ACCEL_SCALE;
-    float new_gx = gx * GYRO_SCALE;   // rad/s
-    float new_gy = gy * GYRO_SCALE;
-    float new_gz = gz * GYRO_SCALE;
+    // Convert to SI units (shared math in driftbot_math.h)
+    float new_ax = db_accel_ms2(ax);  // m/s²
+    float new_ay = db_accel_ms2(ay);
+    float new_az = db_accel_ms2(az);
+    float new_gx = db_gyro_rad_s(gx);  // rad/s
+    float new_gy = db_gyro_rad_s(gy);
+    float new_gz = db_gyro_rad_s(gz);
 
     // Sanity check: only discard if ALL values are exactly zero (I2C failure)
     if (ax == 0 && ay == 0 && az == 0 && gx == 0 && gy == 0 && gz == 0) {
@@ -238,26 +239,22 @@ void imu_update() {
 
     // ── Apply calibrated gyro bias correction (from calibration tool) ────────
     // These values measured 2026-07-16 with robot still on flat surface
-    new_gx -= (-0.0469f);  // sensor gX bias
-    new_gy -= (-0.0007f);  // sensor gY bias
-    new_gz -= (+0.0086f);  // sensor gZ bias
+    // (DB_GYRO_BIAS_* in driftbot_math.h: X=-0.0469, Y=-0.0007, Z=+0.0086)
+    db_gyro_apply_bias(&new_gx, &new_gy, &new_gz);
 
     // ── Apply rotation matrix: sensor frame → robot frame (REP-103) ─────────
     // IMU is mounted with sensor X pointing UP.
     // Robot convention (ROS REP-103): X=forward, Y=left, Z=up
-    //
-    // Rotation (90° around Y axis):
-    //   robot_x = -sensor_z
-    //   robot_y =  sensor_y
-    //   robot_z =  sensor_x
-    //
-    // Same rotation applies to both accel and gyro vectors.
-    current_data.accel_x = -new_az;
-    current_data.accel_y =  new_ay;
-    current_data.accel_z =  new_ax;
-    current_data.gyro_x  = -new_gz;
-    current_data.gyro_y  =  new_gy;
-    current_data.gyro_z  =  new_gx;
+    //   robot_x = -sensor_z, robot_y = sensor_y, robot_z = sensor_x
+    // (db_imu_rotate in driftbot_math.h; same rotation for accel + gyro)
+    float robot[6];
+    db_imu_rotate(new_ax, new_ay, new_az, new_gx, new_gy, new_gz, robot);
+    current_data.accel_x = robot[0];
+    current_data.accel_y = robot[1];
+    current_data.accel_z = robot[2];
+    current_data.gyro_x  = robot[3];
+    current_data.gyro_y  = robot[4];
+    current_data.gyro_z  = robot[5];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
