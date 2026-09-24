@@ -1,5 +1,7 @@
 # DriftBot — Ground Robot with 360° Scanning-ToF SLAM (ROS2)
 
+[![CI](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml/badge.svg)](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml)
+
 A from-scratch ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP for real-time SLAM — and the entire robot is **simulated in Gazebo Harmonic** with a matching sensor suite for reproducible, hardware-free runs.
 
 **Built to demonstrate:** full-stack robotics — embedded firmware, sensor integration with optional EKF, state estimation, real-time control, ROS2 integration, and simulation.
