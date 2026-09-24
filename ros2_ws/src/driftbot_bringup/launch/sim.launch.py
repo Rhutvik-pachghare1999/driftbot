@@ -298,7 +298,13 @@ def generate_launch_description():
         output='screen',
     )
     recorder = ExecuteProcess(
-        cmd=['ros2', 'bag', 'record', '--storage', 'mcap', '-a', '-o', bag_path],
+        # Exclude /camera/image_raw: 1280x720 rgb8 @ 30 Hz = ~83 MB/s
+        # (a 90-min session would fill ~450 GB). Record everything else.
+        cmd=[
+            'ros2', 'bag', 'record', '--storage', 'mcap', '-a',
+            '--exclude-topics', '/camera/image_raw',
+            '-o', bag_path,
+        ],
         output='screen',
         emulate_tty=False,
     )
