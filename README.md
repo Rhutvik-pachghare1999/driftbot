@@ -120,7 +120,7 @@ export GZ_PARTITION=dummy
 python3 scripts/sim_e2e_run.py
 ```
 
-### Run Autonomous Navigation Demo (Nav2)
+### Run Autonomous Navigation Demo (Nav2) — *known issues*
 
 ```bash
 # In a separate terminal (after sim is running)
@@ -128,6 +128,8 @@ export GZ_PARTITION=dummy
 ros2 launch driftbot_bringup sim.launch.py start_rviz:=true enable_nav2:=true
 python3 scripts/sim_nav2_demo.py
 ```
+
+> **Note:** The autonomous demo currently has TF time-sync issues and the Nav2 action server may not be ready within the 60s timeout. See [Limitations](#limitations). The teleop evaluation (`sim_e2e_run.py`) works reliably.
 
 *Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.*
 
