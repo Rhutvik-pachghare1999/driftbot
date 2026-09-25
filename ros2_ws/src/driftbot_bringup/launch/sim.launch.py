@@ -30,11 +30,10 @@ ROS 2 stack:
       r_l 3.8.3 NaNs permanently when two independently-stamped Odometry
       streams are fused (see config/ekf_local.yaml header).
   - slam_toolbox (async, lifecycle) on /scan -> map -> odom + /map
+  - Nav2 (lifecycle): map_server -> planner_server -> controller_server ->
+    behavior_server -> bt_navigator -> waypoint_follower -> velocity_smoother ->
+    lifecycle_manager_navigation
   - optional RViz2, optional mcap recorder
-
-The Jackal is spawned at t+3s (after the gz server is up) via
-`ros_gz_sim create -file` with the xacro-expanded URDF; bridge/EKF/SLAM
-start at t+7s (after sensors and controllers are live).
 """
 
 import os
@@ -47,10 +46,9 @@ from launch.actions import (
     ExecuteProcess,
     GroupAction,
     RegisterEventHandler,
-    TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
-from launch.event_handlers import OnProcessStart
+from launch.event_handlers import OnProcessStart, OnProcessExit
 from launch.events import matches_action
 from launch.substitutions import (
     Command,
@@ -346,8 +344,7 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}],
     )
 
-    # Nav2 lifecycle: configure/activate map_server first (provides /map for costmaps)
-    # Then configure/activate the rest of the Nav2 stack
+    # Nav2 lifecycle events
     map_configure = EmitEvent(
         event=ChangeState(
             lifecycle_node_matcher=matches_action(map_server),
@@ -361,20 +358,7 @@ def generate_launch_description():
         )
     )
 
-    nav2_configure = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=matches_action(planner_server),
-            transition_id=Transition.TRANSITION_CONFIGURE,
-        )
-    )
-    nav2_activate = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=matches_action(planner_server),
-            transition_id=Transition.TRANSITION_ACTIVATE,
-        )
-    )
-
-    # Start map_server when SLAM is active (so /map is available)
+    # Start map_server + lifecycle_manager_localization when SLAM is active
     map_on_slam_active = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=slam_toolbox,
@@ -384,7 +368,7 @@ def generate_launch_description():
         )
     )
 
-    # Start Nav2 stack when map_server is active
+    # When map_server becomes active, configure the rest of Nav2 stack
     nav2_on_map_active = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=map_server,
@@ -394,24 +378,22 @@ def generate_launch_description():
                 planner_server, controller_server, behavior_server,
                 bt_navigator, waypoint_follower, velocity_smoother,
                 lifecycle_manager_navigation,
-                nav2_configure,
+                map_activate,  # activate map_server so it publishes /map
             ],
         )
     )
 
-    # Configure/activate planner_server triggers rest of Nav2 via lifecycle_manager
+    # When planner_server is configured, activate it (lifecycle_manager handles rest)
     planner_on_configured = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=planner_server,
             start_state='configuring',
             goal_state='inactive',
-            entities=[planner_server, controller_server, behavior_server,
-                      bt_navigator, waypoint_follower, velocity_smoother,
-                      lifecycle_manager_navigation, nav2_activate],
+            entities=[planner_server],
         )
     )
 
-    # ── 7. Visualization ──────────────────────────────────────────────────────
+    # ── 8. Visualization ──────────────────────────────────────────────────────
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -421,7 +403,7 @@ def generate_launch_description():
         condition=IfCondition(start_rviz),
     )
 
-    # ── 8. Optional recorder ──────────────────────────────────────────────────
+    # ── 9. Optional recorder ──────────────────────────────────────────────────
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     bag_name = f'jackal_sim_{stamp}'
     bag_path = PathJoinSubstitution([bag_dir, bag_name])
@@ -442,11 +424,12 @@ def generate_launch_description():
         condition=IfCondition(record_bag),
         actions=[
             mkdir_bag_dir,
-            TimerAction(period=2.0, actions=[recorder]),
+            # TimerAction(period=2.0, actions=[recorder]),  # uncomment when needed
+            recorder,
         ],
     )
 
-    # ── 9. Controller spawners ────────────────────────────────────────────────
+    # ── 10. Controller spawners ───────────────────────────────────────────────
     # gz_ros2_control creates the controller_manager (with the controllers yaml
     # as its parameter file) but does NOT load/activate the controllers
     # themselves — spawn them against the CM running inside the gz server.
@@ -466,22 +449,8 @@ def generate_launch_description():
     # Event-based sequencing:
     # 1. Start gz sim immediately
     # 2. Spawn Jackal when gz sim process starts (server ready)
-    # 3. Start bridge/EKF/SLAM when Jackal spawn completes
-    # 4. Start controller spawners when bridge is up
-    gz_sim_headless = ExecuteProcess(
-        condition=IfCondition(headless),
-        cmd=['gz', 'sim', '-s', '-r', '--headless-rendering',
-             LaunchConfiguration('world')],
-        output='screen',
-        env=gz_env,
-    )
-    gz_sim_gui = ExecuteProcess(
-        condition=UnlessCondition(headless),
-        cmd=['gz', 'sim', '-r', '-v', '3', LaunchConfiguration('world')],
-        output='screen',
-        env=gz_env,
-    )
-
+    # 3. Start bridge/EKF/SLAM when spawn process EXITS (spawn completed)
+    # 4. Start controller spawners when bridge process starts
     spawn_on_gz = RegisterEventHandler(
         OnProcessStart(
             target_action=gz_sim_headless,
@@ -494,10 +463,11 @@ def generate_launch_description():
             on_start=[spawn_jackal],
         )
     )
-    stack_on_spawn = RegisterEventHandler(
-        OnProcessStart(
+    # Use OnProcessExit to wait for spawn_jackal to complete (not just start)
+    stack_on_spawn_exit = RegisterEventHandler(
+        OnProcessExit(
             target_action=spawn_jackal,
-            on_start=[bridge, ekf_local, slam_toolbox],
+            on_exit=[bridge, ekf_local, slam_toolbox],
         )
     )
     spawners_on_bridge = RegisterEventHandler(
@@ -521,7 +491,7 @@ def generate_launch_description():
         rsp,
         spawn_on_gz,
         spawn_on_gz_gui,
-        stack_on_spawn,
+        stack_on_spawn_exit,
         spawners_on_bridge,
         slam_on_start,
         slam_on_configured,

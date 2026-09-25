@@ -2,7 +2,7 @@
 <package format="3">
   <name>driftbot_bringup</name>
   <version>0.1.0</version>
-  <description>DriftBot laptop-side nodes: scan assembly, odometry, SLAM launch</description>
+  <description>DriftBot Gazebo simulation: Clearpath Jackal j100 with SICK lidar, EKF, SLAM, and Nav2 autonomous navigation</description>
   <maintainer email="rpachagha@asu.edu">Rhutvik Pachghare</maintainer>
   <license>MIT</license>
 

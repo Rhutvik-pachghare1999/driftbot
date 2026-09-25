@@ -10,7 +10,7 @@ Then:
 
 What it does:
   1. Verifies the stack is live (waits for /map + all three odom streams)
-  2. Measures live publish rates for 5 s (sensor + odometry topics)
+  2. Measures live publish rates for 5 s SIM TIME (sensor + odometry topics)
   3. Drives a coverage path through the corridor (straight + S-curves +
      a U-turn past the box obstacles) via /platform/cmd_vel TwistStamped
      at 10 Hz, recording /platform/odom, /odom (EKF) and /gt_odom
@@ -23,6 +23,9 @@ What it does:
        - docs/maps/sim_corridor_map.pgm/.yaml nav2-format map files
        - docs/maps/sim_e2e_results.json       machine-readable metrics
        - stdout summary
+
+NOTE: All timing uses SIM TIME (node clock) so results are reproducible
+regardless of Gazebo real-time factor.
 """
 
 import json
@@ -39,6 +42,7 @@ import rclpy.parameter
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
+from rclpy.clock import ClockType
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Imu, JointState, LaserScan
 
@@ -259,12 +263,25 @@ def main():
 
     pub = node.create_publisher(TwistStamped, '/platform/cmd_vel', 10)
 
+    # Helper: wait for sim time to advance by duration seconds
+    def wait_sim_time(node, duration_sec):
+        """Block until sim time advances by duration_sec."""
+        clock = node.get_clock()
+        start = clock.now()
+        while rclpy.ok() and (clock.now() - start).nanoseconds < duration_sec * 1e9:
+            rclpy.spin_once(node, timeout_sec=0.05)
+
+    # Helper: get current sim time as float seconds
+    def get_sim_time(node):
+        t = node.get_clock().now().to_msg()
+        return t.sec + t.nanosec * 1e-9
+
     # 1. wait for the stack to be fully alive
     print('[1/7] waiting for /map + odom streams ...', flush=True)
-    t0 = time.monotonic()
+    t0_wall = time.monotonic()
     while rclpy.ok() and ('/map' not in got or any(len(v) < 10 for v in traj.values())):
         rclpy.spin_once(node, timeout_sec=0.1)
-        if time.monotonic() - t0 > 120:
+        if time.monotonic() - t0_wall > 120:
             raise SystemExit('TIMEOUT waiting for stack — is the sim running? '
                              '(ros2 launch driftbot_bringup sim.launch.py start_rviz:=false)')
     print(f'    ok: map {got["/map"].info.width}x{got["/map"].info.height}, '
@@ -274,33 +291,35 @@ def main():
         raise SystemExit('/platform/cmd_vel has no subscriber — '
                          'is platform_velocity_controller active?')
 
-    # 2. measure rates for 5 s
-    print('[2/7] measuring topic rates for 5 s ...', flush=True)
+    # 2. measure rates for 5 s SIM TIME
+    print('[2/7] measuring topic rates for 5 s (sim time) ...', flush=True)
     for t in rates:
         rates[t] = 0
-    t_end = time.monotonic() + 5.0
-    while time.monotonic() < t_end:
+    rate_start = get_sim_time(node)
+    while get_sim_time(node) - rate_start < 5.0:
         rclpy.spin_once(node, timeout_sec=0.05)
-    measured = {t: n / 5.0 for t, n in rates.items()}
+    rate_dur = get_sim_time(node) - rate_start
+    measured = {t: n / rate_dur for t, n in rates.items()}
     for t, r in measured.items():
         print(f'      {t:<22} {r:6.2f} Hz', flush=True)
 
-    # 3. drive the coverage path (10 Hz wall-paced, sim-stamped TwistStamped)
+    # 3. drive the coverage path (10 Hz paced by sim time, sim-stamped TwistStamped)
     total = sum(d for _, _, d in DRIVE_PLAN)
     print(f'[3/7] driving coverage path ({len(DRIVE_PLAN)} segments, '
-          f'{total:.0f} s) ...', flush=True)
+          f'{total:.0f} s sim time) ...', flush=True)
     cmd = TwistStamped()
     n_cmds = 0
-    drive_start_wall = time.monotonic()
     drive_start_sim = None
     last_cmd_sim = None
     for linear, angular, dur in DRIVE_PLAN:
         cmd.twist.linear.x = linear
         cmd.twist.angular.z = angular
-        start, next_pub = time.monotonic(), time.monotonic()
-        end = start + dur
-        while time.monotonic() < end:
-            if time.monotonic() >= next_pub:
+        seg_start = get_sim_time(node)
+        next_pub_sim = seg_start
+        seg_end = seg_start + dur
+        while get_sim_time(node) < seg_end:
+            now_sim = get_sim_time(node)
+            if now_sim >= next_pub_sim:
                 stamp = node.get_clock().now().to_msg()
                 cmd.header.stamp = stamp
                 if drive_start_sim is None:
@@ -308,25 +327,27 @@ def main():
                 last_cmd_sim = stamp.sec + stamp.nanosec * 1e-9
                 pub.publish(cmd)
                 n_cmds += 1
-                next_pub += 0.1
+                next_pub_sim += 0.1
             rclpy.spin_once(node, timeout_sec=0.01)
-    drive_end_wall = time.monotonic()
     # last_cmd_sim holds the sim timestamp of the last drive command
 
     # 4. stop + settle
-    print('[4/7] stopping + letting SLAM settle 6 s ...', flush=True)
+    print('[4/7] stopping + letting SLAM settle 6 s (sim time) ...', flush=True)
     stop = TwistStamped()
-    end = time.monotonic() + 0.5
-    while time.monotonic() < end:
+    # send stop commands for 0.5s sim time
+    stop_start = get_sim_time(node)
+    while get_sim_time(node) - stop_start < 0.5:
         stop.header.stamp = node.get_clock().now().to_msg()
         pub.publish(stop)
-        time.sleep(0.025)
-    got.pop('/map', None)
-    end = time.monotonic() + 6.0
-    while time.monotonic() < end:
         rclpy.spin_once(node, timeout_sec=0.05)
-    deadline = time.monotonic() + 10.0
-    while '/map' not in got and time.monotonic() < deadline:
+    got.pop('/map', None)
+    # wait 6s sim time for SLAM to settle
+    settle_start = get_sim_time(node)
+    while get_sim_time(node) - settle_start < 6.0:
+        rclpy.spin_once(node, timeout_sec=0.05)
+    # wait for new map (max 10s sim time)
+    deadline = get_sim_time(node) + 10.0
+    while '/map' not in got and get_sim_time(node) < deadline:
         rclpy.spin_once(node, timeout_sec=0.1)
     if '/map' not in got:
         raise SystemExit('no /map captured — SLAM not publishing')

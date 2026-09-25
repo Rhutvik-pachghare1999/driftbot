@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml/badge.svg)](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml)
 
-A ROS 2 autonomous ground-robot simulation and SLAM evaluation project using:
+A ROS 2 simulation and SLAM evaluation project using:
 
 **Clearpath Jackal j100 → Gazebo Harmonic → gz_ros2_control → SICK LMS1xx lidar → robot_localization EKF → slam_toolbox → Nav2 → ground-truth trajectory/map evaluation**
 
@@ -10,9 +10,11 @@ A ROS 2 autonomous ground-robot simulation and SLAM evaluation project using:
 
 ## Overview
 
-This project demonstrates a complete autonomous navigation stack running entirely in Gazebo Harmonic simulation. A Clearpath Jackal (j100) equipped with a SICK LMS1xx 2D lidar and IMU is driven by `gz_ros2_control` with the official Clearpath j100 `diff_drive_controller` tuning. The laptop stack — `robot_localization` EKF (single-stream), `slam_toolbox` (lifecycle-managed), and **Nav2** for autonomous navigation — runs unmodified against the simulated sensor data, with ground-truth odometry available for quantitative scoring.
+This project demonstrates a complete simulation stack in Gazebo Harmonic. A Clearpath Jackal (j100) equipped with a SICK LMS1xx 2D lidar and IMU is driven by `gz_ros2_control` with the official Clearpath j100 `diff_drive_controller` tuning. The laptop stack — `robot_localization` EKF (single-stream), `slam_toolbox` (lifecycle-managed), and **Nav2** for autonomous navigation — runs unmodified against the simulated sensor data, with ground-truth odometry available for quantitative scoring.
 
-**Key result:** 8.97 m driven autonomously, EKF ATE RMSE 6.4 cm, SLAM map 8.5×2.5 m at 3.1 cm obstacle precision with zero spurious cells, 89.8% surface recall vs continuous ground-truth geometry.
+**Verified teleop result:** 8.97 m driven via scripted teleop, EKF ATE RMSE 6.4 cm, SLAM map 8.5×2.5 m at 3.1 cm obstacle precision with zero spurious cells, 89.8% surface recall vs continuous ground-truth geometry.
+
+**Nav2 autonomous navigation** is implemented and launchable (`sim_nav2_demo.py`); its end-to-end metrics are not yet published.
 
 ---
 
@@ -34,9 +36,9 @@ This project demonstrates a complete autonomous navigation stack running entirel
 
 ---
 
-## Verified Results
+## Verified Results (Teleop Evaluation)
 
-### Trajectory (8.97 m autonomous path, 1,917 EKF↔GT synced samples)
+### Trajectory (8.97 m scripted teleop, 1,917 EKF↔GT synced samples)
 
 | Metric | Value |
 |--------|-------|
@@ -76,8 +78,20 @@ cd ros2_ws && colcon build --symlink-install && source install/setup.zsh
 # 2. Launch simulation (headless, ~25 s for controllers to activate)
 export GZ_PARTITION=dummy
 ros2 launch driftbot_bringup sim.launch.py start_rviz:=false
+```
 
-# 3. Run autonomous navigation demo (in a separate terminal)
+### Run Teleop Evaluation (produces the verified 8.97 m result)
+
+```bash
+# In a separate terminal
+export GZ_PARTITION=dummy
+python3 scripts/sim_e2e_run.py
+```
+
+### Run Autonomous Navigation Demo (Nav2)
+
+```bash
+# In a separate terminal (after sim is running)
 export GZ_PARTITION=dummy
 python3 scripts/sim_nav2_demo.py
 ```
@@ -92,14 +106,14 @@ Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.
 
 1. **gz sim** starts (headless, EGL vendor configurable via `egl_vendor` arg)
 2. **Jackal spawn** triggers on gz process start (`ros_gz_sim create -file ...`)
-3. **Bridge / EKF / SLAM / Nav2** start when spawn completes
-4. **Controller spawners** start when bridge is up
+3. **Bridge / EKF / SLAM / Nav2** start when spawn process **exits** (spawn completed)
+4. **Controller spawners** start when bridge process starts
 
 ### Topic Contract (sim time throughout)
 
 | ROS Topic | Type | Rate | Notes |
 |-----------|------|------|-------|
-| `/platform/cmd_vel` | `TwistStamped` | 10 Hz in | Nav2 → diff_drive_controller (sim-stamped) |
+| `/platform/cmd_vel` | `TwistStamped` | 10 Hz in | Nav2/teleop → diff_drive_controller (sim-stamped) |
 | `/platform/odom` | `Odometry` | 50 Hz | diff_drive_controller → EKF (vx+vyaw only) |
 | `/odom` | `Odometry` | 30 Hz | EKF output (`odom` frame) |
 | `/gt_odom` | `Odometry` | 50 Hz | Ground truth (eval only) |
@@ -122,14 +136,14 @@ TF tree: `robot_state_publisher` (URDF), EKF `odom→base_link`, slam_toolbox `m
 
 ## Evaluation
 
-Run the scripted end-to-end benchmark:
+Run the scripted end-to-end benchmark (teleop):
 
 ```bash
 # Terminal 1: launch sim
 export GZ_PARTITION=dummy
 ros2 launch driftbot_bringup sim.launch.py start_rviz:=false
 
-# Terminal 2: run evaluation (drive + ATE + map metrics)
+# Terminal 2: run evaluation (teleop drive + ATE + map metrics)
 python3 scripts/sim_e2e_run.py
 ```
 
@@ -144,15 +158,15 @@ Outputs:
 
 ```
 ├── ros2_ws/src/driftbot_bringup/
-│   ├── driftbot_bringup/          (topic_monitor)
+│   ├── driftbot_bringup/          (empty — no hardware nodes)
 │   ├── launch/
-│   │   ├── sim.launch.py          (Gazebo + Jackal + bridge + EKF + SLAM + Nav2)
-│   │   └── nav2_bringup.py        (Nav2 params + lifecycle)
+│   │   └── sim.launch.py          (Gazebo + Jackal + bridge + EKF + SLAM + Nav2)
 │   ├── config/
 │   │   ├── slam_toolbox.yaml
 │   │   ├── ekf_local.yaml
 │   │   ├── jackal_controllers.yaml
 │   │   ├── nav2_params.yaml
+│   │   ├── map_server.yaml
 │   │   └── driftbot.rviz
 │   └── gz/
 │       ├── robots/jackal_sim.urdf.xacro
@@ -166,7 +180,7 @@ Outputs:
 ├── docs/maps/
 │   ├── sim_corridor_map.pgm/.yaml
 │   └── sim_e2e_results.json
-└── .github/workflows/ci.yml       (firmware host tests + ROS2 build + launch checks)
+└── .github/workflows/ci.yml       (ROS2 build + launch checks)
 ```
 
 ---
@@ -185,9 +199,10 @@ Outputs:
 
 ## Limitations
 
-- **End-to-end evidence is simulation-only.** The Gazebo run (8.97 m, EKF ATE 6.4 cm, 3.1 cm precision, 0 spurious, 89.8% recall) is the verified full-pipeline result.
+- **Teleop result only.** The 8.97 m / 6.4 cm ATE / 3.1 cm precision result comes from `sim_e2e_run.py` (scripted teleop). Nav2 autonomous end-to-end metrics are not yet published.
 - **Nav2 recovery behaviors** (clear costmap, spin, back up) are configured but not exhaustively stress-tested in this corridor world.
 - **Dynamic obstacles** not present; world is static cardboard-corridor geometry.
+- **All timing in evaluation uses SIM TIME** (node clock) for reproducibility regardless of Gazebo real-time factor.
 
 ---
 

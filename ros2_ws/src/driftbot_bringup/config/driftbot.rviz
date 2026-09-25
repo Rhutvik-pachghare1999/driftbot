@@ -53,7 +53,7 @@ Visualization Manager:
         Head Length: 0.03
         Head Radius: 0.04
 
-    # ── LaserScan (red dots — 360° scan from ToF assembly) ─────────────────
+    # ── LaserScan (red dots — SICK LMS1xx 270° lidar) ──────────────────────────
     - Class: rviz_default_plugins/LaserScan
       Name: LaserScan
       Enabled: true
