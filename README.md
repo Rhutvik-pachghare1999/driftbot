@@ -235,7 +235,8 @@ python3 scripts/sim_e2e_run.py
 
 ## Limitations
 
-- **Teleop result only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% recall result comes from `sim_e2e_run.py` (scripted teleop, all timing in sim time). Nav2 autonomous end-to-end metrics are not yet published.
+- **Published benchmark is teleop-only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% recall result comes from `sim_e2e_run.py` (scripted velocity drive, all timing in sim time). Nav2 autonomous navigation is implemented in `sim.launch.py` and `sim_nav2_demo.py`; full autonomous benchmark metrics (waypoint success rate, autonomous ATE, navigation duration, recovery events) have not yet been published.
+- **Nav2 stack not yet built from source.** The Nav2 launch configuration and parameters are complete, but the stack requires building from source (behaviortree_cpp, GraphicsMagick, test_msgs dependencies) which was not completed in CI. Install `ros-jazzy-nav2-*` packages for out-of-the-box autonomous runs.
 - **Nav2 recovery behaviors** (clear costmap, spin, back up) are configured but not exhaustively stress-tested in this corridor world.
 - **Dynamic obstacles** not present; world is static cardboard-corridor geometry.
 - **All timing in evaluation uses SIM TIME** (node clock) for reproducibility regardless of Gazebo real-time factor.
