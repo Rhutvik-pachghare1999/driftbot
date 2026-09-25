@@ -6,45 +6,45 @@
     "path_len_odom_m": 8.96
   },
   "rates_hz": {
-    "/scan": 30.4,
-    "/imu/data": 50.0,
+    "/scan": 90.6,
+    "/imu/data": 150.0,
     "/platform/odom": 50.0,
     "/odom": 30.0,
-    "/gt_odom": 50.0,
+    "/gt_odom": 150.0,
     "/platform/joint_states": 50.0
   },
   "trajectory": {
-    "ate_rmse_ekf_m": 0.0558,
-    "ate_rmse_controller_m": 0.0559,
-    "synced_samples_ekf": 1566,
+    "ate_rmse_ekf_m": 0.057,
+    "ate_rmse_controller_m": 0.0556,
+    "synced_samples_ekf": 1565,
     "final_pose_error_ekf": {
-      "x": 0.0106,
-      "y": -0.109,
-      "heading": 0.0167,
-      "euclidean": 0.1095
+      "x": 0.0105,
+      "y": -0.1123,
+      "heading": 0.0176,
+      "euclidean": 0.1127
     },
     "final_pose_error_controller": {
       "x": -0.0015,
-      "y": -0.1147,
-      "heading": 0.0187,
-      "euclidean": 0.1147
+      "y": -0.114,
+      "heading": 0.0185,
+      "euclidean": 0.114
     }
   },
   "map": {
     "width": 171,
-    "height": 49,
+    "height": 50,
     "resolution_m": 0.05000000074505806,
-    "occupied_cells": 428,
-    "free_cells": 7764,
-    "unknown_cells": 187,
+    "occupied_cells": 522,
+    "free_cells": 7818,
+    "unknown_cells": 210,
     "metrics_vs_gt_surfaces": {
-      "precision_rmse_m": 0.0522,
-      "precision_within_5cm": 0.7804,
-      "precision_within_10cm": 0.8972,
+      "precision_rmse_m": 0.0267,
+      "precision_within_5cm": 0.9119,
+      "precision_within_10cm": 1.0,
       "spurious_cells_beyond_30cm": 0,
-      "recall_within_10cm": 0.6612,
+      "recall_within_10cm": 0.9975,
       "n_surface_samples": 1210
     },
-    "iou_occupied_raster_reference": 0.161
+    "iou_occupied_raster_reference": 0.33
   }
 }

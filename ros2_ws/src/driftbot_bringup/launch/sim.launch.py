@@ -266,12 +266,12 @@ def generate_launch_description():
         )
     )
 
-    # ── 7. Nav2 (after SLAM activates, so map is available) ───────────────────
-    # Conditionally included via enable_nav2 launch argument
+    # ── 7. Nav2 (conditionally enabled, after SLAM activates) ───────────────────
     nav2_params = PathJoinSubstitution([pkg_dir, 'config', 'nav2_params.yaml'])
     map_server_params = PathJoinSubstitution([pkg_dir, 'config', 'map_server.yaml'])
 
-    map_server = LifecycleNode(
+    # Nav2 lifecycle configure event (referenced by action object)
+    map_server_action = LifecycleNode(
         package='nav2_map_server',
         executable='map_server',
         name='map_server',
@@ -280,7 +280,7 @@ def generate_launch_description():
         parameters=[map_server_params, sim_time],
     )
 
-    planner_server = LifecycleNode(
+    planner_server_action = LifecycleNode(
         package='nav2_planner',
         executable='planner_server',
         name='planner_server',
@@ -289,7 +289,7 @@ def generate_launch_description():
         parameters=[nav2_params, sim_time],
     )
 
-    controller_server = LifecycleNode(
+    controller_server_action = LifecycleNode(
         package='nav2_controller',
         executable='controller_server',
         name='controller_server',
@@ -299,7 +299,7 @@ def generate_launch_description():
         remappings=[('/cmd_vel', '/platform/cmd_vel')],
     )
 
-    behavior_server = LifecycleNode(
+    behavior_server_action = LifecycleNode(
         package='nav2_behaviors',
         executable='behavior_server',
         name='behavior_server',
@@ -309,7 +309,7 @@ def generate_launch_description():
         remappings=[('/cmd_vel', '/platform/cmd_vel')],
     )
 
-    bt_navigator = LifecycleNode(
+    bt_navigator_action = LifecycleNode(
         package='nav2_bt_navigator',
         executable='bt_navigator',
         name='bt_navigator',
@@ -318,7 +318,7 @@ def generate_launch_description():
         parameters=[nav2_params, sim_time],
     )
 
-    waypoint_follower = LifecycleNode(
+    waypoint_follower_action = LifecycleNode(
         package='nav2_waypoint_follower',
         executable='waypoint_follower',
         name='waypoint_follower',
@@ -327,7 +327,7 @@ def generate_launch_description():
         parameters=[nav2_params, sim_time],
     )
 
-    lifecycle_manager_navigation = Node(
+    lifecycle_manager_navigation_action = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
         name='lifecycle_manager_navigation',
@@ -335,7 +335,7 @@ def generate_launch_description():
         parameters=[nav2_params, sim_time],
     )
 
-    lifecycle_manager_localization = Node(
+    lifecycle_manager_localization_action = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
         name='lifecycle_manager_localization',
@@ -343,56 +343,56 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}],
     )
 
-    # Nav2 lifecycle events
+    # Nav2 lifecycle configure events (referenced by action objects)
     map_configure = EmitEvent(
         event=ChangeState(
-            lifecycle_node_matcher=matches_action(map_server),
+            lifecycle_node_matcher=matches_action(map_server_action),
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        )
+    )
+    planner_configure = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(planner_server_action),
             transition_id=Transition.TRANSITION_CONFIGURE,
         )
     )
 
-    # Start map_server + lifecycle_manager_localization when SLAM is active
-    map_on_slam_active = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=slam_toolbox,
-            start_state='activating',
-            goal_state='active',
-            entities=[map_server, lifecycle_manager_localization, map_configure],
-        )
-    )
-
-    # When map_server is active, start all Nav2 lifecycle nodes
-    # lifecycle_manager_navigation (autostart=true) will configure/activate them
-    nav2_on_map_active = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=map_server,
-            start_state='activating',
-            goal_state='active',
-            entities=[
-                planner_server,
-                controller_server,
-                behavior_server,
-                bt_navigator,
-                waypoint_follower,
-                lifecycle_manager_navigation,
-            ],
-        )
-    )
-
-    # Wrap Nav2 stack in a group conditioned on enable_nav2
+    # Nav2 nodes are created ONLY inside the conditional group to avoid double execution
     nav2_group = GroupAction(
         condition=IfCondition(enable_nav2),
         actions=[
-            map_server,
-            planner_server,
-            controller_server,
-            behavior_server,
-            bt_navigator,
-            waypoint_follower,
-            lifecycle_manager_navigation,
-            lifecycle_manager_localization,
-            map_on_slam_active,
-            nav2_on_map_active,
+            map_server_action,
+            planner_server_action,
+            controller_server_action,
+            behavior_server_action,
+            bt_navigator_action,
+            waypoint_follower_action,
+            lifecycle_manager_navigation_action,
+            lifecycle_manager_localization_action,
+            # When SLAM activates, configure map_server + lifecycle_manager_localization
+            RegisterEventHandler(
+                OnStateTransition(
+                    target_lifecycle_node=slam_toolbox,
+                    start_state='activating',
+                    goal_state='active',
+                    entities=[
+                        map_configure,
+                        lifecycle_manager_localization_action,
+                    ],
+                )
+            ),
+            # When map_server activates, configure planner_server
+            # lifecycle_manager_navigation (autostart=true) will handle the rest
+            RegisterEventHandler(
+                OnStateTransition(
+                    target_lifecycle_node=map_server_action,
+                    start_state='activating',
+                    goal_state='active',
+                    entities=[
+                        planner_configure,
+                    ],
+                )
+            ),
         ],
     )
 

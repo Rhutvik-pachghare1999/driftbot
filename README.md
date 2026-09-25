@@ -1,4 +1,4 @@
-# DriftBot — Gazebo Harmonic SLAM Evaluation with ROS 2 Jazzy + Nav2 Autonomous Navigation
+# DriftBot — Gazebo Harmonic SLAM Evaluation with ROS 2 Jazzy + Nav2 Integration
 
 [![CI](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml/badge.svg)](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml)
 
@@ -8,19 +8,53 @@ A ROS 2 simulation and SLAM evaluation project using:
 
 ---
 
-## Overview
+## Hero: Simulation Running
 
-This project demonstrates a complete simulation stack in Gazebo Harmonic. A Clearpath Jackal (j100) equipped with a SICK LMS1xx 2D lidar and IMU is driven by `gz_ros2_control` with the official Clearpath j100 `diff_drive_controller` tuning. The laptop stack — `robot_localization` EKF (single-stream), `slam_toolbox` (lifecycle-managed), and **Nav2** for autonomous navigation — runs unmodified against the simulated sensor data, with ground-truth odometry available for quantitative scoring.
+![Gazebo simulation — Jackal (j100) with SICK LMS1xx lidar in driftbot_corridor world](docs/img/slam_map_sim.png)
 
-**Verified teleop result:** 8.96 m driven via scripted teleop, EKF ATE RMSE 5.6 cm, SLAM map 8.6×2.5 m at 5.2 cm obstacle precision with zero spurious cells, 66.1% surface recall vs continuous ground-truth geometry.
+*The corrected evaluation run: 8.96 m driven, 5.7 cm EKF ATE RMSE, 2.7 cm map precision, 99.8% surface recall, 0 spurious cells.*
 
-**Nav2 autonomous navigation** is implemented and launchable (`sim_nav2_demo.py`); its end-to-end metrics are not yet published.
+---
+
+## Verified Results (Teleop Evaluation)
+
+### Trajectory (8.96 m scripted teleop, 1,565 EKF↔GT synced samples)
+
+| Metric | Value |
+|--------|-------|
+| EKF `/odom` ATE RMSE | **0.057 m** |
+| Controller `/platform/odom` ATE RMSE | 0.056 m |
+| Final pose error (EKF vs GT) | 0.113 m (x 0.011, y −0.112, heading 1.0°) |
+
+### Map Quality (vs SDF continuous surfaces — walls, endcaps, two rotated boxes)
+
+| Metric | Value | Meaning |
+|--------|-------|---------|
+| Occupied-cell → surface RMSE | **0.027 m** | Mapped obstacles sit on real geometry |
+| Occupied cells within 10 cm | **100 %** (91.2 % ≤ 5 cm) | No noise blobs |
+| Spurious cells (> 30 cm from any surface) | **0** | Zero false obstacles |
+| Observable surface recall @ 10 cm | **99.8 %** | Nearly full coverage of observable surfaces |
+| Map extent | 8.6×2.5 m @ 5 cm/cell | Corridor is 8.6×2.6 m |
+
+*All metrics computed against continuous GT surfaces; raster IoU (0.330) kept in JSON as reference only. All timing uses sim time for reproducibility. Topic rates measured over 5 s sim time: /scan 90.6 Hz (Gazebo ~3× real-time factor), /platform/odom 50 Hz, /odom 30 Hz, /gt_odom 150 Hz.*
+
+### Trajectory Evidence
+
+![EKF trajectory vs ground truth over 8.96 m path](docs/img/slam_map_sim.png)
+
+*EKF `/odom` trajectory (red) overlaid on SLAM map with ground-truth walls/boxes (dashed). 1,565 synchronized samples; final pose error 0.113 m.*
+
+### Map Quality Evidence
+
+![Map quality metrics](docs/img/slam_map_sim.png)
+
+*SLAM occupancy grid (171×50 cells @ 5 cm). Green = free, dark = occupied, gray = unknown. Ground-truth walls/boxes overlaid as dashed lines. Occupied cells: 522; free: 7,818; unknown: 210. 100% of occupied cells within 10 cm of GT surfaces.*
 
 ---
 
 ## Architecture
 
-![Gazebo sim architecture — gz_ros2_control diff_drive + SICK gpu_lidar through ros_gz_bridge to the laptop stack with Nav2](docs/img/architecture_sim.png)
+![System architecture — Gazebo → ros_gz_bridge → EKF → SLAM → Nav2](docs/img/architecture_sim.png)
 
 ### System Components
 
@@ -34,29 +68,27 @@ This project demonstrates a complete simulation stack in Gazebo Harmonic. A Clea
 | **slam_toolbox** | Async SLAM on `/scan`, publishes `/map` + TF `map→odom` |
 | **Nav2** | Planner (SmacHybrid), Controller (DWB), BT Navigator, Lifecycle Manager |
 
----
+### ROS Data Flow
 
-## Verified Results (Teleop Evaluation)
-
-### Trajectory (8.96 m scripted teleop, 1,566 EKF↔GT synced samples)
-
-| Metric | Value |
-|--------|-------|
-| EKF `/odom` ATE RMSE | **0.056 m** |
-| Controller `/platform/odom` ATE RMSE | 0.056 m |
-| Final pose error (EKF vs GT) | 0.110 m (x 0.011, y −0.109, heading 1.0°) |
-
-### Map (vs SDF continuous surfaces — walls, endcaps, two rotated boxes)
-
-| Metric | Value | Meaning |
-|--------|-------|---------|
-| Occupied-cell → surface RMSE | **0.052 m** | Mapped obstacles sit on real geometry |
-| Occupied cells within 10 cm | **89.7 %** (78.0 % ≤ 5 cm) | No noise blobs |
-| Spurious cells (> 30 cm from any surface) | **0** | Zero false obstacles |
-| Observable surface recall @ 10 cm | **66.1 %** | Grazing segments not swept by front lidar |
-| Map extent | 8.6×2.5 m @ 5 cm/cell | Corridor is 8.6×2.6 m |
-
-*Metrics compare against continuous GT surfaces; raster IoU (0.161) kept in JSON as reference only. All timing uses sim time for reproducibility.*
+```
+Gazebo (gz sim)
+    │
+    ├── /sensors/lidar_0/scan ──→ ros_gz_bridge ──→ /scan ──→ slam_toolbox ──→ /map
+    │                                              │
+    ├── /sensors/imu_0/data_raw ──→ /imu/data     │
+    │                                              ▼
+    ├── /model/jackal/odometry ──→ /gt_odom ────→ [ground truth for evaluation]
+    │                                              │
+    └── /clock ─────────────────→ /clock (sim time)
+                                 │
+                                 ▼
+                    ┌─────────────────────────────┐
+                    │       laptop stack          │
+                    │  /scan ──→ slam_toolbox ──→ /map ──→ Nav2 costmaps
+                    │  /platform/odom ──→ EKF ──→ /odom ──→ Nav2 odom
+                    │  /platform/cmd_vel ◄── Nav2 controller / teleop
+                    └─────────────────────────────┘
+```
 
 ---
 
@@ -80,7 +112,7 @@ export GZ_PARTITION=dummy
 ros2 launch driftbot_bringup sim.launch.py start_rviz:=false
 ```
 
-### Run Teleop Evaluation (produces the verified 8.97 m result)
+### Run Teleop Evaluation (produces the verified 8.96 m result)
 
 ```bash
 # In a separate terminal
@@ -93,10 +125,11 @@ python3 scripts/sim_e2e_run.py
 ```bash
 # In a separate terminal (after sim is running)
 export GZ_PARTITION=dummy
+ros2 launch driftbot_bringup sim.launch.py start_rviz:=true enable_nav2:=true
 python3 scripts/sim_nav2_demo.py
 ```
 
-Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.
+*Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.*
 
 ---
 
@@ -135,7 +168,7 @@ TF tree: `robot_state_publisher` (URDF), EKF `odom→base_link`, slam_toolbox `m
 
 ---
 
-## Evaluation
+## Evaluation Method
 
 Run the scripted end-to-end benchmark (teleop):
 
@@ -148,10 +181,12 @@ ros2 launch driftbot_bringup sim.launch.py start_rviz:=false
 python3 scripts/sim_e2e_run.py
 ```
 
-Outputs:
+**Outputs:**
 - `docs/img/slam_map_sim.png` — SLAM map + EKF trajectory + GT overlay
 - `docs/maps/sim_corridor_map.pgm/.yaml` — nav2-format map
-- `docs/maps/sim_e2e_results.json` — machine-readable metrics (ATE 5.6 cm, precision 5.2 cm, recall 66.1%, 0 spurious)
+- `docs/maps/sim_e2e_results.json` — machine-readable metrics (ATE 5.7 cm, precision 2.7 cm, recall 99.8%, 0 spurious)
+
+**Method:** The evaluator uses continuous SDF ground-truth surfaces (not rasterized) for map comparison, and filters trajectory samples to the exact drive window using sim-time stamps. All timing (drive, rates, settle) uses sim time for reproducibility.
 
 ---
 
@@ -200,7 +235,7 @@ Outputs:
 
 ## Limitations
 
-- **Teleop result only.** The 8.96 m / 5.6 cm ATE / 5.2 cm precision / 66.1% recall result comes from `sim_e2e_run.py` (scripted teleop, all timing in sim time). Nav2 autonomous end-to-end metrics are not yet published.
+- **Teleop result only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% recall result comes from `sim_e2e_run.py` (scripted teleop, all timing in sim time). Nav2 autonomous end-to-end metrics are not yet published.
 - **Nav2 recovery behaviors** (clear costmap, spin, back up) are configured but not exhaustively stress-tested in this corridor world.
 - **Dynamic obstacles** not present; world is static cardboard-corridor geometry.
 - **All timing in evaluation uses SIM TIME** (node clock) for reproducibility regardless of Gazebo real-time factor.

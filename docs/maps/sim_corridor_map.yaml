@@ -1,6 +1,6 @@
 image: sim_corridor_map.pgm
 resolution: 0.05000000074505806
-origin: [-2.2520223971377376, -1.2404059496762718, 0.0]
+origin: [-2.2513872469392986, -1.2528149274729314, 0.0]
 negate: 0
 occupied_thresh: 0.65
 free_thresh: 0.25
