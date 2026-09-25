@@ -85,7 +85,7 @@ class ScanAssembler(Node):
         # Subscribers
         # Try to get actual joint state from Gazebo (may not be available)
         self.create_subscription(JointState, 'scan_joint/state', self.joint_cb, 10)
-        # Fallback: commanded servo angle from servo_sweep
+        # Fallback: commanded servo angle published by the firmware
         self.create_subscription(Float32, 'servo/position', self.servo_cb, 10)
         # ToF sensors
         self.create_subscription(Range, 'tof/sensor_0', self.tof0_cb, 10)

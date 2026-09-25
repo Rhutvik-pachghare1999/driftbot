@@ -1,30 +1,44 @@
 """
-sim.launch.py — One-command Gazebo Harmonic simulation of DriftBot.
+sim.launch.py — One-command Gazebo Harmonic simulation: Clearpath Jackal (j100).
 
-Replaces the ESP32 hardware with a gz-sim model that mirrors the real robot:
-  - Ackermann drive (wheelbase 235mm, track 128mm, 64mm wheels)
-  - Scanning servo: sinusoidal sweep 96±60 deg at 3 rad/s (servo_sweep.py)
-  - 3 ToF beams on the scan head at mount angles 180/115/0 deg (gpu_lidar)
-  - IMU on the chassis
+Robot: assembled from open-source Clearpath components (BSD):
+  - clearpath_platform_description: j100 platform — chassis (real mesh),
+    4 outdoor wheels, gz IMU + GPS sensors, diff_4wd ros2_control drivetrain
+    wired to gz_ros2_control, gz PosePublisher
+  - clearpath_sensors_description: SICK LMS1xx front lidar (270° FOV,
+    540 beams @ 0.5° resolution, 30 Hz gpu_lidar)
 
-Runs the SAME laptop stack as the real robot:
-  - scan_assembler (mounts 180/115/0, servo_reference 96)
-  - slam_toolbox (config/slam_toolbox.yaml)
-  - static TF base_link -> base_scan / imu_link
+Drive & odometry (gz_ros2_control auto-loads the controller_manager and
+activates all controllers from config/jackal_controllers.yaml — the
+official Clearpath j100 diff_4wd values incl. wheel_separation_multiplier
+1.5 skid-steer compensation and realistic twist covariances):
+  /platform/cmd_vel      (in)  geometry_msgs/TwistStamped — drive command
+  /platform/odom         (out) nav_msgs/Odometry        — EKF input (single stream)
+  /platform/joint_states (out) sensor_msgs/JointState   — wheels (RSP)
+
+Gazebo topics -> ros_gz_bridge -> ROS 2:
+  /sensors/lidar_0/scan    -> /scan     (sensor_msgs/LaserScan)
+  /sensors/imu_0/data_raw  -> /imu/data (sensor_msgs/Imu — bags/eval only,
+                              deliberately NOT fused into the EKF)
+  /model/jackal/odometry  -> /gt_odom  (ground-truth odometry, eval only)
+  /clock                  -> /clock
+
+ROS 2 stack:
+  - robot_state_publisher: URDF TF (base_link -> chassis, wheels, lidar, imu)
+  - robot_localization EKF (ekf_local): SINGLE Odometry stream /platform/odom
+      (vx + vyaw only) -> TF odom -> base_link. Single-stream by design:
+      r_l 3.8.3 NaNs permanently when two independently-stamped Odometry
+      streams are fused (see config/ekf_local.yaml header).
+  - slam_toolbox (async, lifecycle) on /scan -> map -> odom + /map
   - optional RViz2, optional mcap recorder
 
-Usage:
-    cd /home/rhutvik/Drift_bot
-    source /opt/ros/jazzy/setup.bash
-    source ros2_ws/install/setup.bash
-    ros2 launch driftbot_bringup sim.launch.py
-
-Drive (separate terminal):
-    ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-        '{linear: {x: 0.2}, angular: {z: 0.0}}'
+The Jackal is spawned at t+3s (after the gz server is up) via
+`ros_gz_sim create -file` with the xacro-expanded URDF; bridge/EKF/SLAM
+start at t+7s (after sensors and controllers are live).
 """
 
 import os
+from datetime import datetime
 
 from launch import LaunchDescription
 from launch.actions import (
@@ -38,8 +52,13 @@ from launch.actions import (
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessStart
 from launch.events import matches_action
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    Command,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.actions import LifecycleNode, Node
+from launch_ros.descriptions import ParameterValue
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
@@ -75,7 +94,7 @@ def generate_launch_description():
     record_bag_arg = DeclareLaunchArgument(
         'record_bag',
         default_value='false',
-        description='Record all topics to an .mcap bag (default off: disk is tight).',
+        description='Record all topics to an .mcap bag.',
     )
     bag_dir_arg = DeclareLaunchArgument(
         'bag_dir',
@@ -83,46 +102,91 @@ def generate_launch_description():
         description='Directory where bag files are written.',
     )
 
-    world = LaunchConfiguration('world')
     headless = LaunchConfiguration('headless')
     start_rviz = LaunchConfiguration('start_rviz')
     rviz_config = LaunchConfiguration('rviz_config')
     record_bag = LaunchConfiguration('record_bag')
     bag_dir = LaunchConfiguration('bag_dir')
 
-    params_file = PathJoinSubstitution(
-        [pkg_dir, 'config', 'robot_params.yaml'])
-    slam_params = PathJoinSubstitution(
-        [pkg_dir, 'config', 'slam_toolbox.yaml'])
+    slam_params = PathJoinSubstitution([pkg_dir, 'config', 'slam_toolbox.yaml'])
+    ekf_local_params = PathJoinSubstitution(
+        [pkg_dir, 'config', 'ekf_local.yaml'])
+    controllers_yaml = PathJoinSubstitution(
+        [pkg_dir, 'config', 'jackal_controllers.yaml'])
+    robot_xacro = PathJoinSubstitution(
+        [pkg_dir, 'gz', 'robots', 'jackal_sim.urdf.xacro'])
 
     sim_time = {'use_sim_time': True}
 
+    xacro_cmd = [
+        'xacro ', robot_xacro,
+        ' is_sim:=true',
+        ' gazebo_controllers:=', controllers_yaml,
+        ' namespace:=',
+    ]
+
     # ── 1. Gazebo server ──────────────────────────────────────────────────────
-    # GZ_SIM_RESOURCE_PATH lets model://driftbot resolve to our model dir.
-    # __EGL_VENDOR_LIBRARY_FILENAMES: headless rendering needs the NVIDIA EGL
-    # vendor library (Mesa EGL fails: "failed to create dri2 screen").
+    # GZ_SIM_RESOURCE_PATH must include the ament share dir so gz can resolve
+    # package://clearpath_* mesh URIs inside the URDF.
     gz_env = {
-        'GZ_SIM_RESOURCE_PATH': os.path.join(pkg_share, 'gz', 'models'),
+        'GZ_SIM_RESOURCE_PATH':
+            '/opt/ros/jazzy/share:' + os.path.join(pkg_share, 'gz', 'models'),
+        # gz looks for system plugins (gz_ros2_control) here:
+        'GZ_SIM_SYSTEM_PLUGIN_PATH': '/opt/ros/jazzy/lib',
         '__EGL_VENDOR_LIBRARY_FILENAMES':
             '/usr/share/glvnd/egl_vendor.d/10_nvidia.json',
         **os.environ,
     }
     gz_sim_headless = ExecuteProcess(
         condition=IfCondition(headless),
-        cmd=['gz', 'sim', '-s', '-r', '--headless-rendering', world],
+        cmd=['gz', 'sim', '-s', '-r', '--headless-rendering',
+             LaunchConfiguration('world')],
         output='screen',
         env=gz_env,
     )
     gz_sim_gui = ExecuteProcess(
         condition=UnlessCondition(headless),
-        cmd=['gz', 'sim', '-r', '-v', '3', world],
+        cmd=['gz', 'sim', '-r', '-v', '3', LaunchConfiguration('world')],
         output='screen',
         env=gz_env,
     )
 
-    # ── 2. ros_gz_bridge ──────────────────────────────────────────────────────
-    # gz -> ROS: odometry, ToF LaserScans (remapped to _raw), IMU, clock, joint state
-    # ROS -> gz: cmd_vel (remapped from /cmd_vel), scan head joint position
+    # ── 2. robot_state_publisher (URDF TF: base_link -> chassis/wheels/sensors)
+    rsp = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        output='screen',
+        parameters=[
+            {
+                'robot_description': ParameterValue(
+                    Command(xacro_cmd), value_type=str),
+            },
+            sim_time,
+        ],
+        remappings=[('/joint_states', '/platform/joint_states')],
+    )
+
+    # ── 3. Spawn the Jackal into gz (after the server is up) ─────────────────
+    # Expand the xacro to a URDF file, then spawn it via the gz create service.
+    # Substitutions are passed as positional args to `bash -c` ($0, $1, $2).
+    urdf_file = '/tmp/jackal_sim_spawn.urdf'
+    spawn_jackal = ExecuteProcess(
+        cmd=[
+            'bash', '-c',
+            'xacro "$0" is_sim:=true gazebo_controllers:="$1" namespace:= '
+            '-o "$2" && ros2 run ros_gz_sim create -file "$2" '
+            # z 0.10: Jackal wheel bottom sits at -0.0635 rel base_link;
+            # spawning lower buries the wheels in the ground and the robot
+        '   -x 0 -y 0 -z 0.10',
+            robot_xacro,       # $0
+            controllers_yaml,  # $1
+            urdf_file,         # $2
+        ],
+        output='screen',
+    )
+
+    # ── 4. ros_gz_bridge ──────────────────────────────────────────────────────
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -130,120 +194,33 @@ def generate_launch_description():
         output='screen',
         parameters=[sim_time],
         arguments=[
-            # ROS -> gz: teleop /drive velocity
-            '/model/driftbot/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
-            # gz -> ROS: AckermannSteering odometry
-            '/model/driftbot/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
-            # ROS -> gz: scan head joint position command (sweep).
-            # JointPositionController uses a custom <topic> in model.sdf
-            # (default topic has a numeric token, invalid in ROS).
-            '/scan_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
-            # gz -> ROS: scan joint state (actual position from Gazebo)
-            '/model/driftbot/joint/scan_joint/state@sensor_msgs/msg/JointState[gz.msgs.JointState',
-            # gz -> ROS: ToF beams (single-sample LaserScans)
-            '/tof/sensor_0@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/tof/sensor_1@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/tof/sensor_2@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            # gz -> ROS: IMU
-            '/imu/data@sensor_msgs/msg/Imu[gz.msgs.IMU',
-            # gz -> ROS: forward camera
-            '/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
             # gz -> ROS: sim clock
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            # gz -> ROS: SICK LMS1xx lidar
+            '/sensors/lidar_0/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            # gz -> ROS: Jackal IMU (bags/eval only — NOT fused)
+            '/sensors/imu_0/data_raw@sensor_msgs/msg/Imu[gz.msgs.IMU',
+            # gz -> ROS: ground-truth odometry (eval only)
+            '/model/jackal/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
         ],
         remappings=[
-            # ROS side names: real-robot topic names
-            ('/model/driftbot/cmd_vel', '/cmd_vel'),
-            ('/model/driftbot/odometry', '/odom'),
-            ('/model/driftbot/joint/scan_joint/state', '/scan_joint/state'),
-            # ToF LaserScans go to _raw; tof_adapter publishes the real
-            # sensor_msgs/Range topics on /tof/sensor_{0,1,2}.
-            ('/tof/sensor_0', '/tof/sensor_0_raw'),
-            ('/tof/sensor_1', '/tof/sensor_1_raw'),
-            ('/tof/sensor_2', '/tof/sensor_2_raw'),
+            ('/sensors/lidar_0/scan', '/scan'),
+            ('/sensors/imu_0/data_raw', '/imu/data'),
+            ('/model/jackal/odometry', '/gt_odom'),
         ],
     )
 
-    # ── 3. Simulated hardware drivers ────────────────────────────────────────
-    # Scan head sweep (identical math to firmware servo_driver.cpp)
-    servo_sweep = Node(
-        package='driftbot_bringup',
-        executable='servo_sweep',
-        name='servo_sweep',
+    # ── 5. robot_localization EKF (odom frame, single Odometry stream) ───────
+    ekf_local = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_local',
         output='screen',
-        parameters=[sim_time],
+        parameters=[ekf_local_params, sim_time],
+        remappings=[('/odometry/filtered', '/odom')],
     )
 
-    # ToF LaserScan -> Range adapter (real firmware publishes Range)
-    tof_adapter = Node(
-        package='driftbot_bringup',
-        executable='tof_adapter',
-        name='tof_adapter',
-        output='screen',
-        parameters=[sim_time],
-    )
-
-    # odom -> base_link TF from Gazebo odometry (replaces odometry_node)
-    odom_tf = Node(
-        package='driftbot_bringup',
-        executable='odom_tf',
-        name='odom_tf',
-        output='screen',
-        parameters=[sim_time],
-    )
-
-    # ── 4. Static TF (same tree as the real robot) ───────────────────────────
-    static_scan_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='base_to_scan_tf',
-        arguments=[
-            '--x', '0', '--y', '0', '--z', '0.05',
-            '--roll', '0', '--pitch', '0', '--yaw', '0',
-            '--frame-id', 'base_link',
-            '--child-frame-id', 'base_scan',
-        ],
-    )
-
-    static_imu_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='base_to_imu_tf',
-        arguments=[
-            '--x', '0', '--y', '0', '--z', '0',
-            '--roll', '0', '--pitch', '0', '--yaw', '0',
-            '--frame-id', 'base_link',
-            '--child-frame-id', 'imu_link',
-        ],
-    )
-
-    # Front camera at chassis front (sensor pose 0.13 0 0.02 in the
-    # chassis link frame; chassis link sits at z=0.06 -> camera_link
-    # at z=0.08 in base_link).
-    static_camera_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='base_to_camera_tf',
-        arguments=[
-            '--x', '0.13', '--y', '0', '--z', '0.08',
-            '--roll', '0', '--pitch', '0', '--yaw', '0',
-            '--frame-id', 'base_link',
-            '--child-frame-id', 'camera_link',
-        ],
-    )
-
-    # ── 5. Real perception stack (unchanged) ────────────────────────────────
-    scan_assembler = Node(
-        package='driftbot_bringup',
-        executable='scan_assembler',
-        name='scan_assembler',
-        output='screen',
-        parameters=[params_file, sim_time],
-    )
-
-    # async_slam_toolbox_node is a LIFECYCLE node: a plain Node launch
-    # leaves it unconfigured (never subscribes to /scan). Use LifecycleNode
-    # + configure/activate transitions, per slam_toolbox's own launch files.
+    # ── 6. SLAM (async, lifecycle) ────────────────────────────────────────────
     slam_toolbox = LifecycleNode(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
@@ -280,7 +257,7 @@ def generate_launch_description():
         )
     )
 
-    # ── 6. Visualization ──────────────────────────────────────────────────────
+    # ── 7. Visualization ──────────────────────────────────────────────────────
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -290,10 +267,9 @@ def generate_launch_description():
         condition=IfCondition(start_rviz),
     )
 
-    # ── 7. Optional recorder ──────────────────────────────────────────────────
-    from datetime import datetime
+    # ── 8. Optional recorder ──────────────────────────────────────────────────
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    bag_name = f'driftbot_sim_{stamp}'
+    bag_name = f'jackal_sim_{stamp}'
     bag_path = PathJoinSubstitution([bag_dir, bag_name])
 
     mkdir_bag_dir = ExecuteProcess(
@@ -301,11 +277,8 @@ def generate_launch_description():
         output='screen',
     )
     recorder = ExecuteProcess(
-        # Exclude /camera/image_raw: 1280x720 rgb8 @ 30 Hz = ~83 MB/s
-        # (a 90-min session would fill ~450 GB). Record everything else.
         cmd=[
             'ros2', 'bag', 'record', '--storage', 'mcap', '-a',
-            '--exclude-topics', '/camera/image_raw',
             '-o', bag_path,
         ],
         output='screen',
@@ -319,13 +292,33 @@ def generate_launch_description():
         ],
     )
 
-    # Give gz sim a moment to come up before bridge/nodes start.
-    # (Event handlers must NOT be delayed: OnProcessStart must be
-    # registered before slam_toolbox's process starts.)
-    delay_stack = TimerAction(period=3.0, actions=[
-        bridge, servo_sweep, tof_adapter, odom_tf,
-        static_scan_tf, static_imu_tf, static_camera_tf,
-        scan_assembler, slam_toolbox,
+    # ── 5b. Controller spawners ───────────────────────────────────────────────
+    # gz_ros2_control creates the controller_manager (with the controllers yaml
+    # as its parameter file) but does NOT load/activate the controllers
+    # themselves — spawn them against the CM running inside the gz server.
+    spawner_jsb = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=['joint_state_broadcaster'],
+        output='screen',
+    )
+    spawner_drive = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=['platform_velocity_controller'],
+        output='screen',
+    )
+
+    # Spawn after gz is up; stack after sensors + controllers are live.
+    spawn_at = TimerAction(period=3.0, actions=[spawn_jackal])
+    delay_stack = TimerAction(period=7.0, actions=[
+        bridge,
+        ekf_local,
+        slam_toolbox,
+    ])
+    delay_spawners = TimerAction(period=9.0, actions=[
+        spawner_jsb,
+        spawner_drive,
     ])
 
     return LaunchDescription([
@@ -338,7 +331,10 @@ def generate_launch_description():
 
         gz_sim_headless,
         gz_sim_gui,
+        rsp,
+        spawn_at,
         delay_stack,
+        delay_spawners,
         slam_on_start,
         slam_on_configured,
         rviz_node,

@@ -125,9 +125,6 @@ jobs:
           import driftbot_bringup.scan_assembler
           import driftbot_bringup.odometry_node
           import driftbot_bringup.topic_monitor
-          import driftbot_bringup.servo_sweep
-          import driftbot_bringup.tof_adapter
-          import driftbot_bringup.odom_tf
           print("ALL NODE MODULES IMPORT OK")
           EOF
           # both launch files evaluate (nodes, lifecycle handlers, config paths)

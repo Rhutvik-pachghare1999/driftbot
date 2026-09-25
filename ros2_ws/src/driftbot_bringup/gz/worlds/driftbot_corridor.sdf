@@ -179,22 +179,23 @@
       </link>
     </model>
 
-    <!-- Box obstacles inside the corridor -->
+    <!-- Box obstacles inside the corridor (0.5 m tall: above the Jackal's
+       lidar plane at ~0.30 m, below the 0.4 m corridor walls) -->
     <model name="box_left">
       <static>true</static>
-      <pose>3.5 0.8 0.15 0 0 0.4</pose>
+      <pose>3.5 0.8 0.25 0 0 0.4</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>0.3 0.3 0.3</size>
+              <size>0.3 0.3 0.5</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>0.3 0.3 0.3</size>
+              <size>0.3 0.3 0.5</size>
             </box>
           </geometry>
           <material>
@@ -207,19 +208,19 @@
 
     <model name="box_right">
       <static>true</static>
-      <pose>4.8 -0.7 0.15 0 0 -0.3</pose>
+      <pose>4.8 -0.7 0.25 0 0 -0.3</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>0.25 0.25 0.25</size>
+              <size>0.25 0.25 0.5</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>0.25 0.25 0.25</size>
+              <size>0.25 0.25 0.5</size>
             </box>
           </geometry>
           <material>
@@ -229,12 +230,5 @@
         </visual>
       </link>
     </model>
-
-    <!-- ── DriftBot ─────────────────────────────────────────────────────────── -->
-    <include>
-      <pose>0 0 0 0 0 0</pose>
-      <name>driftbot</name>
-      <uri>model://driftbot</uri>
-    </include>
   </world>
 </sdf>

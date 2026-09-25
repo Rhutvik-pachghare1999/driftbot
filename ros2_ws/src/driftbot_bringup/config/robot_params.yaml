@@ -1,43 +1,33 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# DriftBot Robot Parameters
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# DriftBot Robot Parameters (Simulation)
+# ═══════════════════════════════════════════════════════════════════════════════
 
+encoder_odometry:
+  ros__parameters:
+    # Wheel geometry (matches model.sdf + firmware calibration)
+    wheel_radius: 0.032         # 32 mm wheels
+    wheel_base: 0.235           # 235 mm wheelbase (front axle -> rear axle)
+    wheel_track: 0.128          # 128 mm track width
+    # Hall-effect encoder spec from firmware/config/calibration_data.txt:
+    # 10 ticks/rev = 0.0201 m/tick. Gazebo joint positions are quantized to
+    # this resolution before integration (simulated encoder realism).
+    ticks_per_rev: 10
+    publish_rate: 20.0          # Hz republish rate for /encoder_odom
+    velocity_window: 0.25        # s sliding window for twist estimation
+
+# Odometry node (for hardware compatibility — not used in sim)
 odometry_node:
   ros__parameters:
-    # Wheel geometry
-    wheel_diameter: 0.064        # 64mm in meters
-    wheel_separation: 0.128      # 128mm between rear wheel centers
-    wheelbase: 0.235             # 235mm from front axle to rear axle
-    ticks_per_revolution: 10     # 10 magnets per wheel
-
-    # Steering
-    steer_center: 140            # Servo angle for straight ahead (calibrated)
-    steer_min: 125               # Full right (calibrated)
-    steer_max: 155               # Full left (calibrated)
-
-    # Model type
-    model: "ackermann"           # Ackermann (car-like) steering
-
-    # Publishing
+    wheel_diameter: 0.064
+    wheel_separation: 0.128
+    wheelbase: 0.235
+    ticks_per_revolution: 10
+    steer_center: 140
+    steer_min: 125
+    steer_max: 155
+    model: "ackermann"
     odom_frame: "odom"
     base_frame: "base_link"
     publish_tf: true
 
-scan_assembler:
-  ros__parameters:
-    # Sensor mount angles (degrees, matching ESP32 tof_config.h)
-    mount_angle_0: 180.0         # Sensor 0 = backward (calibrated)
-    mount_angle_1: 115.0         # Sensor 1 = left-rear (calibrated)
-    mount_angle_2: 0.0           # Sensor 2 = forward (reference)
-
-    # Servo reference angle (servo at this angle = robot forward)
-    servo_reference: 96.0
-
-    # LaserScan parameters
-    scan_frame: "base_scan"
-    angle_min: 0.0               # 0 degrees (radians: 0)
-    angle_max: 360.0             # 360 degrees (radians: 2π)
-    num_bins: 360                # 1° resolution
-    range_min: 0.04              # 40mm (VL53L1X minimum)
-    range_max: 4.0               # 4000mm (VL53L1X maximum)
-    scan_timeout: 2.5            # seconds — one full sweep ~2.1s at speed=3.0
+# EKF parameters are in ekf.yaml

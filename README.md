@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml/badge.svg)](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml)
 
-A from-scratch ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP for real-time SLAM — and the entire robot is **simulated in Gazebo Harmonic** with a matching sensor suite for reproducible, hardware-free runs.
+A from-scratch ground robot featuring a custom rotating ToF sensor array for 360° environment mapping. ESP32-S3 firmware communicates with a ROS2 Jazzy laptop over micro-ROS WiFi UDP for real-time SLAM — and the same laptop SLAM/EKF stack runs **verified end-to-end in Gazebo Harmonic** on a Clearpath Jackal (j100) sim agent with quantitative ground-truth scoring.
 
 **Built to demonstrate:** full-stack robotics — embedded firmware, sensor integration with optional EKF, state estimation, real-time control, ROS2 integration, and simulation.
 
-**Evidence at a glance:** CI runs on every push (firmware host tests + ESP32-S3 build + ROS2 colcon build + launch/config checks) · 12/12 firmware unit tests pass (`pio test -e native`) · ESP32-S3 firmware builds clean · 90-min hardware bag (475k msgs) · **verified end-to-end sim run (6.66 m driven, SLAM map 170×79 cells, IoU=0.078, Wall RMSE=0.87m, 464k-msg bag)** · every figure in this README comes from a recorded session.
+**Evidence at a glance:** CI runs on every push (firmware host tests + ESP32-S3 build + ROS2 colcon build + launch/config checks) · 12/12 firmware unit tests pass (`pio test -e native`) · ESP32-S3 firmware builds clean · 90-min hardware bag (475k msgs) · **verified end-to-end sim run — 8.97 m driven, EKF ATE 6.4 cm, SLAM map 8.5×2.5 m with 3.1 cm obstacle precision and zero spurious cells (`docs/maps/sim_e2e_results.json`)** · every figure in this README comes from a recorded session.
 
 ---
 
@@ -63,83 +63,77 @@ Firmware subtracts the calibrated gyro bias (Z = +0.0086 rad/s) and applies the 
 
 ## 3. Simulation (Gazebo Harmonic) — Verified End-to-End
 
-The complete robot is simulated: Ackermann drive, steering, scanning servo head, 3 ToF beams, IMU, and a front camera — reusing the **real laptop stack unmodified** (`scan_assembler`, `slam_toolbox`, `robot_params.yaml`, static TFs).
+The laptop stack runs unmodified in Gazebo Harmonic on a **Clearpath Jackal (j100)** sim agent: `gz_ros2_control` drives a `diff_drive_controller` with Clearpath's official j100 tuning (wheel geometry, 1.5× skid-steer compensation, realistic twist covariances), a SICK LMS1xx 2D lidar, and an IMU. The same `slam_toolbox` (lifecycle-managed) and `robot_localization` EKF that consume the real robot's data consume the sim's — plus ground-truth odometry for scoring.
 
-![Gazebo sim architecture — gz model/plugins through ros_gz_bridge to the reused laptop stack](docs/img/architecture_sim.png)
+![Gazebo sim architecture — gz_ros2_control diff_drive + SICK gpu_lidar through ros_gz_bridge to the reused laptop stack](docs/img/architecture_sim.png)
 
 ### 3.1 Run it
 
 ```bash
-# headless (EGL headless rendering via NVIDIA vendor lib, set automatically)
+# headless (EGL vendor lib set automatically); controllers activate ~25 s in
 ros2 launch driftbot_bringup sim.launch.py start_rviz:=false
 
-# drive it (separate terminal — gz drive latches the last cmd_vel,
-# always publish a zero Twist to stop)
-ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 0.2}, angular: {z: 0.0}}'
-ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 0.0}, angular: {z: 0.0}}'   # STOP
-
-# or run the scripted end-to-end demo (drives, measures rates,
-# captures the SLAM map + trajectory, saves PGM/YAML + PNG)
+# scripted end-to-end demo: drives a 9-segment coverage path (8.97 m) via
+# /platform/cmd_vel (TwistStamped, 10 Hz), measures live topic rates,
+# records all three odometry streams, captures the SLAM map, and scores
+# trajectory + map against ground truth (ATE, precision, recall)
 python3 scripts/sim_e2e_run.py
 ```
 
-Add `record_bag:=true` for an `.mcap` recording (camera stream excluded — it floods the bag at ~83 MB/s).
+Add `record_bag:=true` for an `.mcap` recording. Drive commands are `geometry_msgs/TwistStamped` **stamped in sim time** — this Jazzy `diff_drive_controller` build subscribes `TwistStamped` unconditionally and halts the robot 0.5 s after the last command (`cmd_vel_timeout`); plain-`Twist` publishers get zero motion (see gotchas below).
 
 ### 3.2 Verified sim topology (all measured live)
 
-| gz topic | ROS topic | Rate | Notes |
+| ROS topic | Type | Rate | Source → consumer |
 |---|---|---:|---|
-| `/model/driftbot/cmd_vel` | `/cmd_vel` | — | AckermannSteering (latches!) |
-| `/model/driftbot/odometry` | `/odom` | ~47 Hz | odom_tf → TF odom→base_link |
-| `/tof/sensor_{0,1,2}` (gpu_lidar) | `/tof/sensor_*_raw` → `/tof/sensor_*` | 10 Hz | 1-sample LaserScan → Range (tof_adapter) |
-| `/imu/data` | `/imu/data` | 10 Hz | frame_id `imu_link` |
-| `/camera/image_raw` | `/camera/image_raw` | 30 Hz | 1280×720 rgb8, `camera_link` |
-| `/scan_joint/cmd_pos` | `/scan_joint/cmd_pos` | — | JointPositionController (ABS mode, 3 rad/s) |
-| — | `/servo/position` | ~49 Hz | servo_sweep (96±60° sine) |
-| — | `/scan` | **0.4 Hz** | scan_assembler (360 bins, correct metadata) |
-| — | `/map`, `/pose` | 0.4 Hz | slam_toolbox (lifecycle-activated) |
+| `/platform/cmd_vel` | `TwistStamped` | 10 Hz in | drive scripts → `platform_velocity_controller` (gz_ros2_control) |
+| `/platform/odom` | `Odometry` | 50 Hz | `diff_drive_controller` → EKF (single stream: vx + vyaw only) |
+| `/odom` | `Odometry` | 30 Hz | `ekf_local` (robot_localization) output |
+| `/gt_odom` | `Odometry` | 50 Hz | gz ground truth via bridge (evaluation only) |
+| `/scan` | `LaserScan` | 30 Hz | SICK LMS1xx gpu_lidar → bridge → slam_toolbox |
+| `/imu/data` | `Imu` | 50 Hz | gz IMU → bridge (bags / future fusion) |
+| `/platform/joint_states` | `JointState` | 50 Hz | `joint_state_broadcaster` → robot_state_publisher |
+| `/map` | `OccupancyGrid` | 0.5 Hz | slam_toolbox (lifecycle-activated) |
 
-**Key `/scan` metadata (verified live):**
-- `angle_min` = 0.0, `angle_max` = 2π − `angle_increment` (not 2π)
-- `angle_increment` = 2π/360 ≈ 0.01745 rad (1°)
-- `time_increment` = sweep_duration / 360 ≈ 5.8 ms
-- `scan_time` = actual sweep duration (~2.1 s)
+TF tree: `robot_state_publisher` (URDF: base_link → chassis, wheels, lidar, imu), EKF `odom → base_link`, slam_toolbox `map → odom`; `/clock` (bridged) drives sim time for the whole stack.
 
 ### 3.3 Real SLAM map from the sim
 
-![SLAM occupancy grid captured from the live Gazebo run, with the driven odom trajectory overlaid](docs/img/slam_map_sim.png)
+![SLAM occupancy grid captured from the live Gazebo run, with the driven EKF trajectory and ground-truth walls/boxes overlaid](docs/img/slam_map_sim.png)
 
-Captured by `scripts/sim_e2e_run.py` from a live run: **170×79 cells @ 5 cm (8.5×4.0 m)**, 532 occupied cells, 6.66 m driven over a 9-segment path (straights + arcs). The saved occupancy grid is in `docs/maps/sim_corridor_map.pgm` + `sim_corridor_map.yaml` (nav2 `map_server` format).
+Captured by `scripts/sim_e2e_run.py` from a live run: **170×50 cells @ 5 cm (8.5×2.5 m)** — the corridor world is 8.6×2.6 m — 489 occupied cells, 8.97 m driven over a 9-segment path (straights, S-curves, and a U-turn threading between two rotated box obstacles), 52 s. Saved as nav2 `map_server`-format `docs/maps/sim_corridor_map.pgm` + `.yaml`; every metric below is in `docs/maps/sim_e2e_results.json`.
 
-### 3.3.1 Ground-truth map comparison (quantitative validation)
+### 3.3.1 Quantitative validation vs ground truth
 
-| Metric | Value | Notes |
+**Trajectory** (1,917 EKF↔`/gt_odom` synced samples over the 8.97 m path):
+
+| Metric | Value |
+|---|---:|
+| EKF `/odom` ATE RMSE | **0.064 m** |
+| controller `/platform/odom` ATE RMSE | 0.061 m |
+| final pose error (EKF vs GT) | 0.116 m (x 0.002, y −0.116, heading 1.1°) |
+
+**Map** (vs the SDF world's continuous surfaces — walls, endcaps, two rotated 0.3×0.3 m boxes):
+
+| Metric | Value | Meaning |
 |---|---:|---|
-| **IoU (occupied cells)** | **0.078** | SLAM occupied vs. ground-truth walls |
-| **Wall RMSE** | **0.87 m** | Mean distance from SLAM occupied cells to nearest GT wall cell |
-| Map size | 170×79 cells | 8.5×4.0 m @ 5 cm/cell |
-| Occupied / free / unknown | 532 / 3,851 / 9,047 | 5 cm resolution |
-| Path driven | 6.66 m | 9 segments, 52 s, 3,117 odom samples |
-| SLAM map rate | 0.4 Hz | Full sweep = 2 direction changes |
+| occupied-cell → surface RMSE | **0.031 m** | mapped obstacles sit on real geometry |
+| occupied cells within 10 cm of a surface | **100 %** (90 % ≤ 5 cm) | no noise blobs |
+| spurious cells (> 30 cm from any surface) | **0** | zero false obstacles |
+| observable surface covered (recall @ 10 cm) | **89.8 %** | remainder = grazing segments the front lidar never swept |
+| map extent | 8.5×2.5 m @ 5 cm | corridor is 8.6×2.6 m |
 
-*Ground truth: 8.6 m corridor, walls at y = ±1.25 m, 0.1 m wall thickness. IoU is low because SLAM map includes free-space and noise; RMSE reflects angular smearing from 10 Hz ToF / 50 Hz servo mismatch — baseline for future improvements.*
+*Metrics compare against continuous GT surfaces rather than rasterized cells (cell-thickness conventions make raster-vs-raster IoU meaningless; the raster IoU, 0.303, is kept in the JSON as a reference only).*
 
-### 3.4 Recorded sim session (464,533 messages)
-
-`bags/driftbot_sim_20260923_195933` (49.2 MB, 471 s, gitignored): `/cmd_vel` 8,785 · `/scan` 165 · `/map` 234 · `/tf` 33,654 · `/odom` 17,260 · `/servo/position` 17,263 · `/tof/sensor_*` 3,453 each · `/imu/data` 3,452 · SLAM `/pose` 25.
-
-### 3.5 Simulation gotchas solved (documented for reproducibility)
+### 3.4 Simulation gotchas solved (documented for reproducibility)
 
 - **Headless EGL**: gz sim needs `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` (Mesa EGL fails headless) — set in `sim.launch.py`.
-- **Invalid ROS topic name**: `JointPositionController`'s default topic `/model/<m>/joint/<j>/<idx>/cmd_pos` has a numeric token — `ros_gz_bridge` crashes on it. Fixed with a `<topic>/scan_joint/cmd_pos</topic>` override + `use_velocity_commands` ABS mode (`cmd_max` 3.0 rad/s, mirrors the real servo).
-- **slam_toolbox is a lifecycle node**: a plain `Node` launch leaves it unconfigured (never subscribes `/scan`). Both launch files now use `LifecycleNode` + configure/activate transitions — `ros2 lifecycle get /slam_toolbox` must report `active [3]`.
-- **gz AckermannSteering latches the last cmd_vel** — always publish a zero `Twist` to stop.
-- **Stale ToF readings → phantom obstacles**: `tof_adapter` now publishes `NaN` for no-return; `scan_assembler` checks `isfinite()` and tracks per-sensor timestamps, invalidating readings older than 0.2 s.
-- **Commanded vs. actual servo angle**: `scan_assembler` subscribes to Gazebo joint state (`/scan_joint/state`) when available; falls back to commanded angle with first-order lag filter (τ=0.15 s) matching the 3 rad/s max joint velocity.
-- **Sensor origin geometry**: Each ToF beam originates 5 cm from the scan-head center; `scan_assembler` adds the offset along the beam direction before binning.
-- **LaserScan metadata correctness**: `angle_max = 2π − angle_increment` (not 2π), `time_increment = sweep_duration / num_bins`, `scan_time = actual sweep duration` — verified live.
+- **`GZ_SIM_SYSTEM_PLUGIN_PATH=/opt/ros/jazzy/lib`** must be exported or gz cannot load `gz_ros2_control`.
+- **Controllers don't self-load**: `gz_ros2_control` creates the `controller_manager`, but spawner nodes must load + activate `joint_state_broadcaster` and `platform_velocity_controller` (staggered ~9 s after spawn in `sim.launch.py`; full activation ~25 s).
+- **Drive topic is `TwistStamped`, sim-stamped**: this Jazzy `diff_drive_controller` build doesn't declare `use_stamped_vel` and subscribes `geometry_msgs/TwistStamped` unconditionally. Plain-`Twist` publishers (stock `teleop_twist_keyboard`) get zero motion, and wall-clock stamps are rejected by the 0.5 s `cmd_vel_timeout` — the controller compares the header stamp against sim time.
+- **Pace publisher loops with wall clock**: a `spin_once`-gated "10 Hz" publish loop actually runs at callback rate (~1 kHz) — a "5 s drive" becomes a 100 ms burst. `scripts/sim_e2e_run.py` paces with `time.monotonic()`.
+- **slam_toolbox is a lifecycle node**: a plain `Node` launch leaves it unconfigured (never subscribes `/scan`). Both launch files use `LifecycleNode` + configure/activate transitions — `ros2 lifecycle get /slam_toolbox` must report `active [3]`.
+- **CLI quirks**: `ros2 topic pub` hangs against gz-embedded subscriptions (use a small rclpy script); `ros2` CLI needs `GZ_PARTITION=dummy` while the gz CLI needs it unset.
 
 ## 4. Hardware
 
@@ -238,11 +232,12 @@ dot -Tpng docs/img/architecture_sim.dot       -o docs/img/architecture_sim.png
 │   ├── components/              servo, tof, imu, encoder, motor, ros_bridge
 │   └── test/                    PlatformIO Unity tests (12 host tests: test_unit_logic; 13 on-hardware: test_robot)
 ├── ros2_ws/src/driftbot_bringup/
-│   ├── driftbot_bringup/        scan_assembler, odometry_node, topic_monitor,
-│   │                            servo_sweep, tof_adapter, odom_tf (sim)
+│   ├── driftbot_bringup/        scan_assembler, odometry_node, topic_monitor
+│   │                            (hardware pipeline nodes; sim needs none of them)
 │   ├── launch/                  bringup.launch.py (hardware), sim.launch.py (Gazebo)
-│   ├── config/                  robot_params.yaml, slam_toolbox.yaml, ekf.yaml, driftbot.rviz
-│   └── gz/                      models/driftbot/model.sdf, worlds/driftbot_corridor.sdf
+│   ├── config/                  robot_params.yaml, slam_toolbox.yaml, ekf_local.yaml,
+│   │                            jackal_controllers.yaml, driftbot.rviz
+│   └── gz/                      robots/jackal_sim.urdf.xacro, worlds/driftbot_corridor.sdf
 ├── scripts/                     start_session.sh, stop_session.sh, make_figures.py,
 │                                plot_slam_map.py, sim_e2e_run.py
 ├── docs/img/                    architecture + data figures (.dot sources + .png)
@@ -263,17 +258,17 @@ dot -Tpng docs/img/architecture_sim.dot       -o docs/img/architecture_sim.png
 | XSHUT address assignment | Three identical VL53L1X on one bus (0x30/0x31/0x32) |
 | Encoders disabled | One encoder unreliable; localization falls back to scan-matching |
 | micro-ROS over WiFi UDP | Untethered robot; 7 topics at ~1.4 Hz sustained |
-| gz-native plugins (no ros2_control) | No sudo to install ros-jazzy-ros2-controllers; AckermannSteering + JointPositionController suffice |
-| gpu_lidar for ToF | gz-sim8 has no `rangefinder`; 1×1-sample gpu_lidar emits `sensor_msgs/LaserScan` |
+| Clearpath Jackal as sim agent | Official j100 ros2_control config (skid-steer compensation, realistic covariances) exercises the unmodified laptop SLAM/EKF stack — hand-rolled gz plugins couldn't |
+| Single-stream EKF by design | Fusing the same wheel odometry twice (odom + TF) double-integrates and NaN'd the filter; EKF consumes `/platform/odom` vx + vyaw only |
 | LifecycleNode for slam_toolbox | plain Node launch leaves it unconfigured — latent bug fixed in BOTH launch files |
 | Camera excluded from bag recorder | 1280×720 rgb8 @ 30 Hz ≈ 83 MB/s flooded a 4-min test bag to 121 GB |
 
 ## 8. Skills Demonstrated
 
 - **Embedded C++** — PlatformIO, FreeRTOS dual-core tasks, MCPWM, I2C, micro-ROS client
-- **ROS2 Jazzy** — custom nodes, lifecycle nodes, ros_gz_bridge, TF tree, rosbag2 mcap
-- **Gazebo Harmonic** — SDF models, world, AckermannSteering/JointPositionController/Sensors systems, headless EGL
-- **SLAM** — slam_toolbox async mode from a 3-beam rotating ToF scan
+- **ROS2 Jazzy** — custom nodes, lifecycle nodes, ros2_control (`diff_drive_controller` + spawners), `robot_localization` EKF, ros_gz_bridge, TF tree, rosbag2 mcap
+- **Gazebo Harmonic** — SDF world authoring, `gz_ros2_control` integration, gpu_lidar sensors, headless EGL rendering
+- **SLAM** — slam_toolbox async mode from a 3-beam rotating ToF scan (hardware) / SICK LMS1xx (sim), with ground-truth-scored map validation
 - **Sensor integration** — scan assembly, optional EKF (robot_localization), IMU bias/rotation correction
 - **Real-time systems** — ISR-safe IRAM_ATTR handlers, watchdogs, debounce, dual-core cache constraints
 - **Signal integrity** — I2C bus isolation, pull-up sizing, power-ramp hardening
@@ -281,13 +276,13 @@ dot -Tpng docs/img/architecture_sim.dot       -o docs/img/architecture_sim.png
 ## Limitations (current scope)
 
 - **No planner / Nav2** — the robot is teleoperated (`/cmd_vel`); the autonomy stack ends at SLAM map building. Nothing here claims autonomous navigation.
-- **End-to-end SLAM evidence is simulation-based.** The Gazebo run (6.69 m driven, 184×112-cell map, 464k-msg bag) is the verified full-pipeline evidence. The 90-min hardware bag (475k msgs) shows the sensor pipeline publishing live data on the real robot, but wheel encoders are disabled (wiring), so on-hardware odometry is static-identity and SLAM localization on hardware is scan-match only — not yet verified as a completed end-to-end map.
+- **End-to-end SLAM evidence is simulation-based.** The Gazebo run (8.97 m driven, EKF ATE 6.4 cm, 8.5×2.5 m map at 3.1 cm obstacle precision with zero spurious cells — `docs/maps/sim_e2e_results.json`) is the verified full-pipeline evidence. The 90-min hardware bag (475k msgs) shows the sensor pipeline publishing live data on the real robot, but wheel encoders are disabled (wiring), so on-hardware odometry is static-identity and SLAM localization on hardware is scan-match only — not yet verified as a completed end-to-end map.
 - **On-hardware `pio test -e esp32s3`** (13 Unity tests) passed on 2026-08-28 with the robot on the bench; it needs the physical robot and is therefore not part of CI. CI runs the 12 host tests (`test_unit_logic`) plus the ESP32-S3 build.
 
 ## Dependencies
 
 **Firmware:** PlatformIO, ESP-IDF, micro-ROS, VL53L1X, MPU6050
-**Laptop:** ROS2 Jazzy, slam_toolbox, robot_localization, ros_gz_bridge, ros_gz_sim, Gazebo Harmonic 8.x
+**Laptop:** ROS2 Jazzy, slam_toolbox, robot_localization, ros2_controllers (diff_drive_controller), gz_ros2_control, ros_gz_bridge, ros_gz_sim, clearpath_platform_description/control, Gazebo Harmonic 8.x
 **Figures:** matplotlib, graphviz (`dot`), rosbag2_py
 
 ## License

@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<!--
+  jackal_sim.urdf.xacro — DriftBot sim robot: Clearpath Jackal (j100).
+
+  Assembled entirely from open-source Clearpath components (BSD):
+    - clearpath_platform_description: j100 platform (chassis mesh, 4 outdoor
+      wheels, gz IMU + GPS sensors, ros2_control diff_4wd drivetrain wired
+      to gz_ros2_control, gz PosePublisher)
+    - clearpath_sensors_description: SICK LMS1xx 2D lidar (gpu_lidar sensor)
+
+  xacro args:
+    is_sim              (true)  — selects gz_ros2_control hardware plugin
+    namespace            ("")    — topic prefix for platform topics
+    gazebo_controllers   — ros2_control controller yaml (auto-loaded by the
+                            gz_ros2_control plugin inside the sim)
+
+  Resulting topics (namespace ""):
+    /platform/cmd_vel        (in)  geometry_msgs/Twist      — drive command
+    /platform/odom           (out) nav_msgs/Odometry        — wheel odometry
+    /platform/joint_states   (out) sensor_msgs/JointState  — wheel joints
+    /sensors/lidar_0/scan    (gz)  laser scan (bridge -> /scan)
+    /sensors/imu_0/data_raw  (gz)  IMU       (bridge -> /imu/data)
+    /sensors/gps_0/navsat    (gz)  GPS       (not bridged — indoor)
+    /model/jackal/odometry   (gz)  ground truth (bridge -> /gt_odom)
+-->
+<robot name="jackal" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="is_sim" default="true" />
+  <xacro:arg name="namespace" default="" />
+  <xacro:arg name="gazebo_controllers"
+             default="$(find driftbot_bringup)/config/jackal_controllers.yaml" />
+
+  <!-- Clearpath Jackal platform (includes drivetrain + ros2_control + IMU/GPS) -->
+  <xacro:include filename="$(find clearpath_platform_description)/urdf/j100/j100.urdf.xacro" />
+  <xacro:include filename="$(find clearpath_sensors_description)/urdf/sick_lms1xx.urdf.xacro" />
+
+  <xacro:j100 control="diff_4wd" front_wheels="outdoor" rear_wheels="outdoor" />
+
+  <!-- Front SICK LMS1xx lidar — the real Jackal's standard front sensor.
+       Mounted on front_0_mount: beam origin lands ~0.30 m above ground,
+       below the 0.4 m corridor walls and hitting the 0.5 m tall boxes. -->
+  <xacro:sick_lms1xx name="lidar_0"
+                     parent_link="front_0_mount"
+                     ang_res="0.5"
+                     min_ang="-2.35619"
+                     max_ang="2.35619"
+                     update_rate="30"
+                     min_range="0.05"
+                     max_range="10.0">
+    <origin xyz="0.09 0 0.02" rpy="0 0 0" />
+  </xacro:sick_lms1xx>
+
+  <!-- Ground-truth odometry (perfect pose, eval only — never fused).
+       Published on the gz topic /model/jackal/odometry. -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_publish_tf>false</odom_publish_tf>
+    </plugin>
+  </gazebo>
+
+</robot>
