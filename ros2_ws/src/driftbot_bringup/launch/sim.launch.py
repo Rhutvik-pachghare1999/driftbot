@@ -262,6 +262,155 @@ def generate_launch_description():
         )
     )
 
+    # ── 7. Nav2 (after SLAM activates, so map is available) ───────────────────
+    nav2_params = PathJoinSubstitution([pkg_dir, 'config', 'nav2_params.yaml'])
+    map_server_params = PathJoinSubstitution([pkg_dir, 'config', 'map_server.yaml'])
+
+    map_server = LifecycleNode(
+        package='nav2_map_server',
+        executable='map_server',
+        name='map_server',
+        namespace='',
+        output='screen',
+        parameters=[map_server_params, sim_time],
+    )
+
+    planner_server = LifecycleNode(
+        package='nav2_planner',
+        executable='planner_server',
+        name='planner_server',
+        namespace='',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    controller_server = LifecycleNode(
+        package='nav2_controller',
+        executable='controller_server',
+        name='controller_server',
+        namespace='',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+        remappings=[('/cmd_vel', '/platform/cmd_vel')],
+    )
+
+    behavior_server = LifecycleNode(
+        package='nav2_behaviors',
+        executable='behavior_server',
+        name='behavior_server',
+        namespace='',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    bt_navigator = LifecycleNode(
+        package='nav2_bt_navigator',
+        executable='bt_navigator',
+        name='bt_navigator',
+        namespace='',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    waypoint_follower = LifecycleNode(
+        package='nav2_waypoint_follower',
+        executable='waypoint_follower',
+        name='waypoint_follower',
+        namespace='',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    velocity_smoother = LifecycleNode(
+        package='nav2_velocity_smoother',
+        executable='velocity_smoother',
+        name='velocity_smoother',
+        namespace='',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    lifecycle_manager_navigation = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_navigation',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    lifecycle_manager_localization = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_localization',
+        output='screen',
+        parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}],
+    )
+
+    # Nav2 lifecycle: configure/activate map_server first (provides /map for costmaps)
+    # Then configure/activate the rest of the Nav2 stack
+    map_configure = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(map_server),
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        )
+    )
+    map_activate = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(map_server),
+            transition_id=Transition.TRANSITION_ACTIVATE,
+        )
+    )
+
+    nav2_configure = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(planner_server),
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        )
+    )
+    nav2_activate = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(planner_server),
+            transition_id=Transition.TRANSITION_ACTIVATE,
+        )
+    )
+
+    # Start map_server when SLAM is active (so /map is available)
+    map_on_slam_active = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=slam_toolbox,
+            start_state='activating',
+            goal_state='active',
+            entities=[map_server, lifecycle_manager_localization, map_configure],
+        )
+    )
+
+    # Start Nav2 stack when map_server is active
+    nav2_on_map_active = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=map_server,
+            start_state='activating',
+            goal_state='active',
+            entities=[
+                planner_server, controller_server, behavior_server,
+                bt_navigator, waypoint_follower, velocity_smoother,
+                lifecycle_manager_navigation,
+                nav2_configure,
+            ],
+        )
+    )
+
+    # Configure/activate planner_server triggers rest of Nav2 via lifecycle_manager
+    planner_on_configured = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=planner_server,
+            start_state='configuring',
+            goal_state='inactive',
+            entities=[planner_server, controller_server, behavior_server,
+                      bt_navigator, waypoint_follower, velocity_smoother,
+                      lifecycle_manager_navigation, nav2_activate],
+        )
+    )
+
     # ── 7. Visualization ──────────────────────────────────────────────────────
     rviz_node = Node(
         package='rviz2',
@@ -376,6 +525,9 @@ def generate_launch_description():
         spawners_on_bridge,
         slam_on_start,
         slam_on_configured,
+        map_on_slam_active,
+        nav2_on_map_active,
+        planner_on_configured,
         rviz_node,
         recorder_group,
     ])

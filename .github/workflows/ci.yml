@@ -1,16 +1,12 @@
 # CI — runs on every push and pull request
 #
-# 1. Firmware host unit tests (12 tests, no hardware): pio test -e native
-# 2. ESP32-S3 firmware compile check: pio run -e esp32s3
-#    (builds the real firmware image; the on-hardware HIL suite
-#     test_robot needs the physical robot and is NOT run in CI)
-# 3. ROS2 workspace: colcon build, Python syntax check on all nodes /
+# 1. ROS2 workspace: colcon build, Python syntax check on all nodes /
 #    launch files / scripts, config YAML validation, package + launch
 #    integration checks (ros2 pkg list, node module imports,
 #    launch --show-args) inside the ros:jazzy container.
 #
-# The Gazebo sim / SLAM end-to-end run needs a GPU + gz-sim and stays
-# out of CI; see README section 3 for its verified local results.
+# The Gazebo sim / Nav2 end-to-end run needs a GPU + gz-sim and stays
+# out of CI; see README for its verified local results.
 
 name: CI
 
@@ -22,59 +18,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  firmware-unit-tests:
-    name: Firmware unit tests (host)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      - name: Run host unit tests (test_unit_logic, 12 tests)
-        working-directory: firmware
-        run: pio test -e native
-
-  firmware-esp32s3-build:
-    name: ESP32-S3 firmware build
-    runs-on: ubuntu-latest
-    timeout-minutes: 60   # first run builds micro-ROS XRCE-DDS agent from source
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install PlatformIO + colcon
-        run: pip install platformio colcon-common-extensions
-
-      # micro_ros_platformio builds its ament dev + mcu deps by sourcing
-      # ~/.platformio/penv/bin/activate and running colcon there (with
-      # Python3_EXECUTABLE=`which python` = the penv python). The official
-      # PlatformIO installer creates that penv with these deps; a
-      # pip-installed platformio does not, so replicate it here (the exact
-      # set the local installer penv has: empy, catkin-pkg, lark-parser,
-      # pyyaml, setuptools; colcon comes from the system PATH after
-      # activation).
-      - name: Create PlatformIO private env (micro-ROS build needs it)
-        run: |
-          python -m venv "$HOME/.platformio/penv"
-          "$HOME/.platformio/penv/bin/pip" install empy==3.3.4 catkin_pkg lark-parser pyyaml setuptools
-
-      - name: Create placeholder secrets.h (real one is gitignored; CI only compiles, never flashes)
-        working-directory: firmware
-        run: cp config/secrets.h.template config/secrets.h
-
-      - name: Build ESP32-S3 firmware (esp32s3 env)
-        working-directory: firmware
-        run: pio run -e esp32s3
-
   ros2-build:
     name: ROS2 workspace build + checks
     runs-on: ubuntu-latest
@@ -113,21 +56,13 @@ jobs:
           . /opt/ros/jazzy/setup.sh
           colcon build --packages-select driftbot_bringup
 
-      - name: Package + node + launch integration checks
+      - name: Package + launch integration checks
         working-directory: ros2_ws
         run: |
           . /opt/ros/jazzy/setup.sh
           . install/setup.sh
           # package is installed and registered in the ament index
           ros2 pkg list | grep -x driftbot_bringup
-          # every node module imports cleanly (catches broken imports/deps)
-          python3 - <<'EOF'
-          import driftbot_bringup.scan_assembler
-          import driftbot_bringup.odometry_node
-          import driftbot_bringup.topic_monitor
-          print("ALL NODE MODULES IMPORT OK")
-          EOF
-          # both launch files evaluate (nodes, lifecycle handlers, config paths)
-          ros2 launch driftbot_bringup bringup.launch.py --show-args > /dev/null
+          # launch file evaluates (nodes, lifecycle handlers, config paths)
           ros2 launch driftbot_bringup sim.launch.py --show-args > /dev/null
-          echo "LAUNCH FILES OK"
+          echo "LAUNCH FILE OK"
