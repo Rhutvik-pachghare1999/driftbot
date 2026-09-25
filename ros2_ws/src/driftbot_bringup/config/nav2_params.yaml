@@ -13,13 +13,13 @@ planner_server:
       max_iterations: 1000000
       max_on_approach_iterations: 1000
       max_planning_time: 5.0
-      terminal_checking_interval: 0.5
+      terminal_checking_interval: 1
       motion_model_for_search: "REEDS_SHEPP"
       angle_quantization_bins: 72
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 3.0
       analytic_expansion_max_cost: 10.0
-      analytic_expansion_max_cost_override: 10.0
+      analytic_expansion_max_cost_override: true
       minimum_turning_radius: 0.3
       reverse_penalty: 2.0
       change_penalty: 0.0

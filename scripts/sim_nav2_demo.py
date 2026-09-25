@@ -15,6 +15,7 @@ import os
 import time
 
 import rclpy
+import rclpy.parameter
 from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
@@ -42,7 +43,8 @@ def yaw_to_quat(yaw):
 
 class Nav2Demo(Node):
     def __init__(self):
-        super().__init__('sim_nav2_demo')
+        super().__init__('sim_nav2_demo', parameter_overrides=[
+            rclpy.parameter.Parameter('use_sim_time', rclpy.Parameter.Type.BOOL, True)])
         self.client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.results = []
 

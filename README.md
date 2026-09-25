@@ -106,8 +106,9 @@ Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.
 
 1. **gz sim** starts (headless, EGL vendor configurable via `egl_vendor` arg)
 2. **Jackal spawn** triggers on gz process start (`ros_gz_sim create -file ...`)
-3. **Bridge / EKF / SLAM / Nav2** start when spawn process **exits** (spawn completed)
+3. **Bridge / EKF / SLAM** start when spawn process **exits** (spawn completed)
 4. **Controller spawners** start when bridge process starts
+5. **Nav2 (map_server + stack)** starts when **SLAM activates** (map available)
 
 ### Topic Contract (sim time throughout)
 
@@ -191,7 +192,7 @@ Outputs:
 - **`GZ_SIM_SYSTEM_PLUGIN_PATH=/opt/ros/jazzy/lib`** must be exported or gz cannot load `gz_ros2_control`.
 - **Controllers don't self-load**: `gz_ros2_control` creates the `controller_manager`; spawners load + activate `joint_state_broadcaster` and `platform_velocity_controller` (event-driven in `sim.launch.py`).
 - **Drive topic is `TwistStamped`, sim-stamped**: This Jazzy `diff_drive_controller` build doesn't declare `use_stamped_vel` and subscribes `geometry_msgs/TwistStamped` unconditionally. Plain-`Twist` publishers get zero motion; wall-clock stamps are rejected by the 0.5 s `cmd_vel_timeout` (header stamp compared against sim time).
-- **Pace publisher loops with wall clock**: A `spin_once`-gated "10 Hz" publish loop actually runs at callback rate (~1 kHz). Scripts pace with `time.monotonic()`.
+- **Pace publisher loops with sim time**: A `spin_once`-gated "10 Hz" publish loop actually runs at callback rate (~1 kHz). Scripts pace using the ROS node clock (sim time) via `wait_sim_time()` helpers.
 - **slam_toolbox is a lifecycle node**: A plain `Node` launch leaves it unconfigured. Both launch files use `LifecycleNode` + configure/activate transitions — `ros2 lifecycle get /slam_toolbox` must report `active [3]`.
 - **CLI quirks**: `ros2 topic pub` hangs against gz-embedded subscriptions (use rclpy script); `ros2` CLI needs `GZ_PARTITION=dummy` while the gz CLI needs it unset.
 

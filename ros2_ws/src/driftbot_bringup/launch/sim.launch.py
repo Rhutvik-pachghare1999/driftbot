@@ -299,6 +299,7 @@ def generate_launch_description():
         namespace='',
         output='screen',
         parameters=[nav2_params, sim_time],
+        remappings=[('/cmd_vel', '/platform/cmd_vel')],
     )
 
     bt_navigator = LifecycleNode(
@@ -314,15 +315,6 @@ def generate_launch_description():
         package='nav2_waypoint_follower',
         executable='waypoint_follower',
         name='waypoint_follower',
-        namespace='',
-        output='screen',
-        parameters=[nav2_params, sim_time],
-    )
-
-    velocity_smoother = LifecycleNode(
-        package='nav2_velocity_smoother',
-        executable='velocity_smoother',
-        name='velocity_smoother',
         namespace='',
         output='screen',
         parameters=[nav2_params, sim_time],
@@ -351,12 +343,6 @@ def generate_launch_description():
             transition_id=Transition.TRANSITION_CONFIGURE,
         )
     )
-    map_activate = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=matches_action(map_server),
-            transition_id=Transition.TRANSITION_ACTIVATE,
-        )
-    )
 
     # Start map_server + lifecycle_manager_localization when SLAM is active
     map_on_slam_active = RegisterEventHandler(
@@ -368,28 +354,21 @@ def generate_launch_description():
         )
     )
 
-    # When map_server becomes active, configure the rest of Nav2 stack
+    # When map_server is active, start all Nav2 lifecycle nodes
+    # lifecycle_manager_navigation (autostart=true) will configure/activate them
     nav2_on_map_active = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=map_server,
             start_state='activating',
             goal_state='active',
             entities=[
-                planner_server, controller_server, behavior_server,
-                bt_navigator, waypoint_follower, velocity_smoother,
+                planner_server,
+                controller_server,
+                behavior_server,
+                bt_navigator,
+                waypoint_follower,
                 lifecycle_manager_navigation,
-                map_activate,  # activate map_server so it publishes /map
             ],
-        )
-    )
-
-    # When planner_server is configured, activate it (lifecycle_manager handles rest)
-    planner_on_configured = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=planner_server,
-            start_state='configuring',
-            goal_state='inactive',
-            entities=[planner_server],
         )
     )
 
@@ -497,7 +476,6 @@ def generate_launch_description():
         slam_on_configured,
         map_on_slam_active,
         nav2_on_map_active,
-        planner_on_configured,
         rviz_node,
         recorder_group,
     ])
