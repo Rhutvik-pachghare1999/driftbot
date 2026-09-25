@@ -2,7 +2,7 @@
 """Autonomous navigation demo for the Jackal sim using Nav2.
 
 Launch the sim first (separate terminal):
-    ros2 launch driftbot_bringup sim.launch.py start_rviz:=true
+    ros2 launch driftbot_bringup sim.launch.py start_rviz:=true enable_nav2:=true
 
 Then run this script. It sends a sequence of navigation goals through the corridor.
 
@@ -85,8 +85,9 @@ class Nav2Demo(Node):
 
     def run(self):
         self.get_logger().info('Waiting for Nav2 action server...')
-        if not self.client.wait_for_server(timeout_sec=60.0):
-            self.get_logger().error('Nav2 action server not available')
+        # Wait longer for Nav2 to fully start up
+        if not self.client.wait_for_server(timeout_sec=120.0):
+            self.get_logger().error('Nav2 action server not available after 120s')
             return
 
         self.get_logger().info('Nav2 action server ready, starting waypoints')
@@ -96,7 +97,7 @@ class Nav2Demo(Node):
             self.results.append((x, y, yaw, success))
             if not success:
                 self.get_logger().warn('Waypoint failed, continuing to next...')
-            time.sleep(1.0)
+            time.sleep(2.0)  # Give more time between waypoints
 
         self.get_logger().info('=== Navigation demo complete ===')
         for i, (x, y, yaw, ok) in enumerate(self.results):

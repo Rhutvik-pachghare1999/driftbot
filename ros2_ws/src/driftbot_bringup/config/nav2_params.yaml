@@ -63,7 +63,7 @@ controller_server:
       goal_dist_tol: 0.25
       xy_goal_tolerance: 0.25
       yaw_goal_tolerance: 0.25
-      transform_tolerance: 0.2
+      transform_tolerance: 0.5
       prune_plan: true
       trans_stopped_vel: 0.15
       short_circuit_trajectory_evaluation: true
@@ -101,7 +101,7 @@ behavior_server:
     local_frame: base_link
     global_frame: map
     robot_base_frame: base_link
-    transform_tolerance: 0.1
+    transform_tolerance: 0.5
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
@@ -110,6 +110,7 @@ behavior_server:
 bt_navigator:
   ros__parameters:
     use_sim_time: True
+    transform_tolerance: 0.5
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
@@ -174,6 +175,7 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: True
+      transform_tolerance: 0.5
       always_send_full_costmap: true
       footprint_padding: 0.01
       robot_base_frame: base_link
@@ -211,6 +213,7 @@ local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: True
+      transform_tolerance: 0.5
       always_send_full_costmap: false
       footprint_padding: 0.01
       robot_base_frame: base_link
@@ -252,4 +255,4 @@ lifecycle_manager_localization:
   ros__parameters:
     use_sim_time: True
     autostart: true
-    node_names: ["map_server", "amcl"]
+    node_names: ["map_server"]

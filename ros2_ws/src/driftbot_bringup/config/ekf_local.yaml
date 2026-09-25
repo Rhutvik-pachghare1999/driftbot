@@ -21,8 +21,8 @@ ekf_local:
     sensor_timeout: 0.2
 
     two_d_mode: false
-    transform_time_offset: 0.0
-    transform_timeout: 0.0
+    transform_time_offset: 0.05
+    transform_timeout: 0.1
     print_diagnostics: false
     debug: false
 

@@ -327,22 +327,6 @@ def generate_launch_description():
         parameters=[nav2_params, sim_time],
     )
 
-    lifecycle_manager_navigation_action = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_navigation',
-        output='screen',
-        parameters=[nav2_params, sim_time],
-    )
-
-    lifecycle_manager_localization_action = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_localization',
-        output='screen',
-        parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}],
-    )
-
     # Nav2 lifecycle configure events (referenced by action objects)
     map_configure = EmitEvent(
         event=ChangeState(
@@ -367,9 +351,8 @@ def generate_launch_description():
             behavior_server_action,
             bt_navigator_action,
             waypoint_follower_action,
-            lifecycle_manager_navigation_action,
-            lifecycle_manager_localization_action,
-            # When SLAM activates, configure map_server + lifecycle_manager_localization
+            # lifecycle managers are auto-started via nav2_params.yaml (autostart=true)
+            # When SLAM activates, configure map_server (which triggers lifecycle_manager_localization)
             RegisterEventHandler(
                 OnStateTransition(
                     target_lifecycle_node=slam_toolbox,
@@ -377,7 +360,6 @@ def generate_launch_description():
                     goal_state='active',
                     entities=[
                         map_configure,
-                        lifecycle_manager_localization_action,
                     ],
                 )
             ),
