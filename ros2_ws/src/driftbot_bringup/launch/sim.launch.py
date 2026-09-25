@@ -340,6 +340,36 @@ def generate_launch_description():
         )
     )
 
+    # Lifecycle manager nodes (regular nodes, not lifecycle nodes)
+    lifecycle_manager_localization_action = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_localization',
+        output='screen',
+        parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}],
+    )
+    lifecycle_manager_navigation_action = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_navigation',
+        output='screen',
+        parameters=[nav2_params, sim_time],
+    )
+
+    # Nav2 lifecycle configure events (referenced by action objects)
+    map_configure = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(map_server_action),
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        )
+    )
+    planner_configure = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=matches_action(planner_server_action),
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        )
+    )
+
     # Nav2 nodes are created ONLY inside the conditional group to avoid double execution
     nav2_group = GroupAction(
         condition=IfCondition(enable_nav2),
@@ -350,8 +380,10 @@ def generate_launch_description():
             behavior_server_action,
             bt_navigator_action,
             waypoint_follower_action,
-            # lifecycle managers are auto-started via nav2_params.yaml (autostart=true)
-            # When SLAM activates, configure map_server (which triggers lifecycle_manager_localization)
+            # lifecycle managers (regular nodes, autostart managed via params)
+            lifecycle_manager_localization_action,
+            lifecycle_manager_navigation_action,
+            # When SLAM activates, configure map_server (triggers lifecycle_manager_localization)
             RegisterEventHandler(
                 OnStateTransition(
                     target_lifecycle_node=slam_toolbox,

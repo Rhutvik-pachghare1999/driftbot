@@ -123,9 +123,11 @@ python3 scripts/sim_e2e_run.py
 ### Run Autonomous Navigation Demo (Nav2) — *experimental*
 
 ```bash
-# In a separate terminal (after sim is running)
+# In a separate terminal (after sim is running WITH Nav2 enabled)
 export GZ_PARTITION=dummy
 ros2 launch driftbot_bringup sim.launch.py start_rviz:=true enable_nav2:=true
+
+# Then in another terminal, run the demo
 python3 scripts/sim_nav2_demo.py
 ```
 
