@@ -120,7 +120,7 @@ export GZ_PARTITION=dummy
 python3 scripts/sim_e2e_run.py
 ```
 
-### Run Autonomous Navigation Demo (Nav2) — *known issues*
+### Run Autonomous Navigation Demo (Nav2) — *experimental*
 
 ```bash
 # In a separate terminal (after sim is running)
@@ -129,7 +129,7 @@ ros2 launch driftbot_bringup sim.launch.py start_rviz:=true enable_nav2:=true
 python3 scripts/sim_nav2_demo.py
 ```
 
-> **Note:** The autonomous demo currently has TF time-sync issues and the Nav2 action server may not be ready within the 60s timeout. See [Limitations](#limitations). The teleop evaluation (`sim_e2e_run.py`) works reliably.
+> **Note:** The autonomous demo currently has TF time-sync issues in headless Gazebo (Gazebo runs faster than real-time, causing EKF "jump back in time" errors). The teleop evaluation (`sim_e2e_run.py`) works reliably. See [Limitations](#limitations).
 
 *Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.*
 
@@ -238,6 +238,7 @@ python3 scripts/sim_e2e_run.py
 ## Limitations
 
 - **Published benchmark is teleop-only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% recall result comes from `sim_e2e_run.py` (scripted velocity drive, all timing in sim time). Nav2 autonomous navigation is implemented in `sim.launch.py` and `sim_nav2_demo.py`; full autonomous benchmark metrics (waypoint success rate, autonomous ATE, navigation duration, recovery events) have not yet been published.
+- **Nav2 autonomous demo has TF time-sync issues.** In headless Gazebo (even with xvfb), the simulator runs faster than real-time (~3×), causing the EKF to receive TF transforms from slam_toolbox/map_server with timestamps in the future relative to its current sim time. This triggers "jump back in time" warnings and prevents the autonomous demo from completing. The teleop evaluation (`sim_e2e_run.py`) works reliably because it uses sim-time pacing.
 - **Nav2 stack not yet built from source.** The Nav2 launch configuration and parameters are complete, but the stack requires building from source (behaviortree_cpp, GraphicsMagick, test_msgs dependencies) which was not completed in CI. Install `ros-jazzy-nav2-*` packages for out-of-the-box autonomous runs.
 - **Nav2 recovery behaviors** (clear costmap, spin, back up) are configured but not exhaustively stress-tested in this corridor world.
 - **Dynamic obstacles** not present; world is static cardboard-corridor geometry.

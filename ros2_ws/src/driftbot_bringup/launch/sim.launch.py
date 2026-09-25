@@ -148,8 +148,7 @@ def generate_launch_description():
     }
     gz_sim_headless = ExecuteProcess(
         condition=IfCondition(headless),
-        cmd=['gz', 'sim', '-s', '-r', '--headless-rendering',
-             LaunchConfiguration('world')],
+        cmd=['xvfb-run', '-a', 'gz', 'sim', '-r', '-v', '3', LaunchConfiguration('world')],
         output='screen',
         env=gz_env,
     )
