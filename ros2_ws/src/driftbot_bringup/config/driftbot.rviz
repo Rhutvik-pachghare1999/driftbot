@@ -89,37 +89,6 @@ Visualization Manager:
       Topic:
         Value: /imu/marker
 
-    # ── Range Sensors (ToF cones — shows individual sensor beams) ──────────
-    - Class: rviz_default_plugins/Range
-      Name: ToF Sensor 0
-      Enabled: true
-      Topic:
-        Value: /tof/sensor_0
-        Reliability: Reliable
-        Durability: Volatile
-      Color: 255; 255; 0
-      Alpha: 0.3
-
-    - Class: rviz_default_plugins/Range
-      Name: ToF Sensor 1
-      Enabled: true
-      Topic:
-        Value: /tof/sensor_1
-        Reliability: Reliable
-        Durability: Volatile
-      Color: 0; 255; 255
-      Alpha: 0.3
-
-    - Class: rviz_default_plugins/Range
-      Name: ToF Sensor 2
-      Enabled: true
-      Topic:
-        Value: /tof/sensor_2
-        Reliability: Reliable
-        Durability: Volatile
-      Color: 0; 255; 0
-      Alpha: 0.3
-
   Global Options:
     Background Color: 30; 30; 30
     Fixed Frame: odom

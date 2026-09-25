@@ -77,7 +77,7 @@ DRIVE_PLAN = [
 #   side walls   y = +/-1.25 center, 0.1 thick, x in [-2.2, 6.2], 0.4 tall
 #   end walls    x = -2.3 / 6.3 center, 0.1 thick, y in [-1.3, 1.3]
 #   box_left     0.3x0.3 at (3.5, 0.8), yaw 0.4,  0.5 tall
-#   box_right    0.3x0.3 at (4.8, -0.7), yaw -0.3, 0.5 tall
+#   box_right    0.25x0.25 at (4.8, -0.7), yaw -0.3, 0.5 tall
 #   lidar plane  z = 0.241 (sees walls at 0.4 and boxes at 0.5)
 GT_WALLS = [  # (x0, x1, y0, y1) axis-aligned rectangles
     (-2.2, 6.2, 1.20, 1.30),
@@ -87,7 +87,7 @@ GT_WALLS = [  # (x0, x1, y0, y1) axis-aligned rectangles
 ]
 GT_BOXES = [  # (cx, cy, half, yaw) rotated squares
     (3.5, 0.8, 0.15, 0.4),
-    (4.8, -0.7, 0.15, -0.3),
+    (4.8, -0.7, 0.125, -0.3),
 ]
 GT_INNER = (-2.25, 6.25, -1.20, 1.20)  # free-space interior bounds
 GT_UNKNOWN_MARGIN = 2.0                 # outside corridor + this = unknown
@@ -190,16 +190,21 @@ def compute_map_metrics(slam, res, ox, oy):
     }
 
 
-def sync_ate(est, gt):
+def sync_ate(est, gt, t_start=None, t_end=None):
     """ATE RMSE of est vs gt, synced by nearest header stamp.
 
     est/gt: lists of (stamp_sec, x, y, yaw). Returns (rmse, n, final_err).
+    If t_start/t_end provided, only use est samples in [t_start, t_end].
     """
     if not est or not gt:
         return float('inf'), 0, {}
     gts = np.array([g[0] for g in gt])
     errs, last = [], None
     for t, x, y, yaw in est:
+        if t_start is not None and t < t_start:
+            continue
+        if t_end is not None and t > t_end:
+            continue
         i = int(np.argmin(np.abs(gts - t)))
         if abs(gts[i] - t) > 0.1:
             continue
@@ -286,6 +291,9 @@ def main():
           f'{total:.0f} s) ...', flush=True)
     cmd = TwistStamped()
     n_cmds = 0
+    drive_start_wall = time.monotonic()
+    drive_start_sim = None
+    last_cmd_sim = None
     for linear, angular, dur in DRIVE_PLAN:
         cmd.twist.linear.x = linear
         cmd.twist.angular.z = angular
@@ -293,11 +301,17 @@ def main():
         end = start + dur
         while time.monotonic() < end:
             if time.monotonic() >= next_pub:
-                cmd.header.stamp = node.get_clock().now().to_msg()
+                stamp = node.get_clock().now().to_msg()
+                cmd.header.stamp = stamp
+                if drive_start_sim is None:
+                    drive_start_sim = stamp.sec + stamp.nanosec * 1e-9
+                last_cmd_sim = stamp.sec + stamp.nanosec * 1e-9
                 pub.publish(cmd)
                 n_cmds += 1
                 next_pub += 0.1
             rclpy.spin_once(node, timeout_sec=0.01)
+    drive_end_wall = time.monotonic()
+    # last_cmd_sim holds the sim timestamp of the last drive command
 
     # 4. stop + settle
     print('[4/7] stopping + letting SLAM settle 6 s ...', flush=True)
@@ -318,15 +332,19 @@ def main():
         raise SystemExit('no /map captured — SLAM not publishing')
     grid = got['/map']
 
-    # 5. trajectory error vs ground truth
+    # 5. trajectory error vs ground truth (only during the drive window)
     print('[5/7] computing trajectory error vs /gt_odom ...', flush=True)
-    ate_ekf, n_ekf, fin_ekf = sync_ate(traj['/odom'], traj['/gt_odom'])
-    ate_ctrl, n_ctrl, fin_ctrl = sync_ate(traj['/platform/odom'], traj['/gt_odom'])
+    ate_ekf, n_ekf, fin_ekf = sync_ate(traj['/odom'], traj['/gt_odom'],
+                                        drive_start_sim, last_cmd_sim)
+    ate_ctrl, n_ctrl, fin_ctrl = sync_ate(traj['/platform/odom'], traj['/gt_odom'],
+                                           drive_start_sim, last_cmd_sim)
     print(f'    EKF /odom     ATE RMSE {ate_ekf:.4f} m over {n_ekf} synced samples', flush=True)
     print(f'    ctrl /platform ATE RMSE {ate_ctrl:.4f} m over {n_ctrl} synced samples', flush=True)
 
-    # path length from EKF odom
-    o = traj['/odom']
+    # path length from EKF odom (drive window only)
+    o = [(t, x, y) for t, x, y, yaw in traj['/odom']
+         if (drive_start_sim is None or t >= drive_start_sim) and
+            (last_cmd_sim is None or t <= last_cmd_sim)]
     path_len = sum(math.hypot(b[1] - a[1], b[2] - a[2]) for a, b in zip(o, o[1:]))
 
     # 6. map comparison against ground-truth geometry

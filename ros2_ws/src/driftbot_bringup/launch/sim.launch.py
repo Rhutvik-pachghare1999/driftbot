@@ -81,6 +81,11 @@ def generate_launch_description():
         default_value='true',
         description='Run gz sim server without GUI (with EGL headless rendering).',
     )
+    egl_vendor_arg = DeclareLaunchArgument(
+        'egl_vendor',
+        default_value='/usr/share/glvnd/egl_vendor.d/10_nvidia.json',
+        description='Path to EGL vendor library JSON for headless rendering (NVIDIA on this machine).',
+    )
     start_rviz_arg = DeclareLaunchArgument(
         'start_rviz',
         default_value='true',
@@ -105,6 +110,7 @@ def generate_launch_description():
     headless = LaunchConfiguration('headless')
     start_rviz = LaunchConfiguration('start_rviz')
     rviz_config = LaunchConfiguration('rviz_config')
+    egl_vendor = LaunchConfiguration('egl_vendor')
     record_bag = LaunchConfiguration('record_bag')
     bag_dir = LaunchConfiguration('bag_dir')
 
@@ -129,13 +135,12 @@ def generate_launch_description():
     # GZ_SIM_RESOURCE_PATH must include the ament share dir so gz can resolve
     # package://clearpath_* mesh URIs inside the URDF.
     gz_env = {
+        **os.environ,
         'GZ_SIM_RESOURCE_PATH':
             '/opt/ros/jazzy/share:' + os.path.join(pkg_share, 'gz', 'models'),
         # gz looks for system plugins (gz_ros2_control) here:
         'GZ_SIM_SYSTEM_PLUGIN_PATH': '/opt/ros/jazzy/lib',
-        '__EGL_VENDOR_LIBRARY_FILENAMES':
-            '/usr/share/glvnd/egl_vendor.d/10_nvidia.json',
-        **os.environ,
+        '__EGL_VENDOR_LIBRARY_FILENAMES': egl_vendor,
     }
     gz_sim_headless = ExecuteProcess(
         condition=IfCondition(headless),
@@ -292,7 +297,7 @@ def generate_launch_description():
         ],
     )
 
-    # ── 5b. Controller spawners ───────────────────────────────────────────────
+    # ── 9. Controller spawners ────────────────────────────────────────────────
     # gz_ros2_control creates the controller_manager (with the controllers yaml
     # as its parameter file) but does NOT load/activate the controllers
     # themselves — spawn them against the CM running inside the gz server.
@@ -309,21 +314,54 @@ def generate_launch_description():
         output='screen',
     )
 
-    # Spawn after gz is up; stack after sensors + controllers are live.
-    spawn_at = TimerAction(period=3.0, actions=[spawn_jackal])
-    delay_stack = TimerAction(period=7.0, actions=[
-        bridge,
-        ekf_local,
-        slam_toolbox,
-    ])
-    delay_spawners = TimerAction(period=9.0, actions=[
-        spawner_jsb,
-        spawner_drive,
-    ])
+    # Event-based sequencing:
+    # 1. Start gz sim immediately
+    # 2. Spawn Jackal when gz sim process starts (server ready)
+    # 3. Start bridge/EKF/SLAM when Jackal spawn completes
+    # 4. Start controller spawners when bridge is up
+    gz_sim_headless = ExecuteProcess(
+        condition=IfCondition(headless),
+        cmd=['gz', 'sim', '-s', '-r', '--headless-rendering',
+             LaunchConfiguration('world')],
+        output='screen',
+        env=gz_env,
+    )
+    gz_sim_gui = ExecuteProcess(
+        condition=UnlessCondition(headless),
+        cmd=['gz', 'sim', '-r', '-v', '3', LaunchConfiguration('world')],
+        output='screen',
+        env=gz_env,
+    )
+
+    spawn_on_gz = RegisterEventHandler(
+        OnProcessStart(
+            target_action=gz_sim_headless,
+            on_start=[spawn_jackal],
+        )
+    )
+    spawn_on_gz_gui = RegisterEventHandler(
+        OnProcessStart(
+            target_action=gz_sim_gui,
+            on_start=[spawn_jackal],
+        )
+    )
+    stack_on_spawn = RegisterEventHandler(
+        OnProcessStart(
+            target_action=spawn_jackal,
+            on_start=[bridge, ekf_local, slam_toolbox],
+        )
+    )
+    spawners_on_bridge = RegisterEventHandler(
+        OnProcessStart(
+            target_action=bridge,
+            on_start=[spawner_jsb, spawner_drive],
+        )
+    )
 
     return LaunchDescription([
         world_arg,
         headless_arg,
+        egl_vendor_arg,
         start_rviz_arg,
         rviz_config_arg,
         record_bag_arg,
@@ -332,9 +370,10 @@ def generate_launch_description():
         gz_sim_headless,
         gz_sim_gui,
         rsp,
-        spawn_at,
-        delay_stack,
-        delay_spawners,
+        spawn_on_gz,
+        spawn_on_gz_gui,
+        stack_on_spawn,
+        spawners_on_bridge,
         slam_on_start,
         slam_on_configured,
         rviz_node,
