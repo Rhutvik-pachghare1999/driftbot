@@ -12,7 +12,7 @@ A ROS 2 simulation and SLAM evaluation project using:
 
 This project demonstrates a complete simulation stack in Gazebo Harmonic. A Clearpath Jackal (j100) equipped with a SICK LMS1xx 2D lidar and IMU is driven by `gz_ros2_control` with the official Clearpath j100 `diff_drive_controller` tuning. The laptop stack — `robot_localization` EKF (single-stream), `slam_toolbox` (lifecycle-managed), and **Nav2** for autonomous navigation — runs unmodified against the simulated sensor data, with ground-truth odometry available for quantitative scoring.
 
-**Verified teleop result:** 8.97 m driven via scripted teleop, EKF ATE RMSE 6.4 cm, SLAM map 8.5×2.5 m at 3.1 cm obstacle precision with zero spurious cells, 89.8% surface recall vs continuous ground-truth geometry.
+**Verified teleop result:** 8.96 m driven via scripted teleop, EKF ATE RMSE 5.6 cm, SLAM map 8.6×2.5 m at 5.2 cm obstacle precision with zero spurious cells, 66.1% surface recall vs continuous ground-truth geometry.
 
 **Nav2 autonomous navigation** is implemented and launchable (`sim_nav2_demo.py`); its end-to-end metrics are not yet published.
 
@@ -38,25 +38,25 @@ This project demonstrates a complete simulation stack in Gazebo Harmonic. A Clea
 
 ## Verified Results (Teleop Evaluation)
 
-### Trajectory (8.97 m scripted teleop, 1,917 EKF↔GT synced samples)
+### Trajectory (8.96 m scripted teleop, 1,566 EKF↔GT synced samples)
 
 | Metric | Value |
 |--------|-------|
-| EKF `/odom` ATE RMSE | **0.064 m** |
-| Controller `/platform/odom` ATE RMSE | 0.061 m |
-| Final pose error (EKF vs GT) | 0.116 m (x 0.002, y −0.116, heading 1.1°) |
+| EKF `/odom` ATE RMSE | **0.056 m** |
+| Controller `/platform/odom` ATE RMSE | 0.056 m |
+| Final pose error (EKF vs GT) | 0.110 m (x 0.011, y −0.109, heading 1.0°) |
 
 ### Map (vs SDF continuous surfaces — walls, endcaps, two rotated boxes)
 
 | Metric | Value | Meaning |
 |--------|-------|---------|
-| Occupied-cell → surface RMSE | **0.031 m** | Mapped obstacles sit on real geometry |
-| Occupied cells within 10 cm | **100 %** (90 % ≤ 5 cm) | No noise blobs |
+| Occupied-cell → surface RMSE | **0.052 m** | Mapped obstacles sit on real geometry |
+| Occupied cells within 10 cm | **89.7 %** (78.0 % ≤ 5 cm) | No noise blobs |
 | Spurious cells (> 30 cm from any surface) | **0** | Zero false obstacles |
-| Observable surface recall @ 10 cm | **89.8 %** | Grazing segments not swept by front lidar |
-| Map extent | 8.5×2.5 m @ 5 cm/cell | Corridor is 8.6×2.6 m |
+| Observable surface recall @ 10 cm | **66.1 %** | Grazing segments not swept by front lidar |
+| Map extent | 8.6×2.5 m @ 5 cm/cell | Corridor is 8.6×2.6 m |
 
-*Metrics compare against continuous GT surfaces; raster IoU (0.303) kept in JSON as reference only.*
+*Metrics compare against continuous GT surfaces; raster IoU (0.161) kept in JSON as reference only. All timing uses sim time for reproducibility.*
 
 ---
 
@@ -151,7 +151,7 @@ python3 scripts/sim_e2e_run.py
 Outputs:
 - `docs/img/slam_map_sim.png` — SLAM map + EKF trajectory + GT overlay
 - `docs/maps/sim_corridor_map.pgm/.yaml` — nav2-format map
-- `docs/maps/sim_e2e_results.json` — machine-readable metrics
+- `docs/maps/sim_e2e_results.json` — machine-readable metrics (ATE 5.6 cm, precision 5.2 cm, recall 66.1%, 0 spurious)
 
 ---
 
@@ -200,7 +200,7 @@ Outputs:
 
 ## Limitations
 
-- **Teleop result only.** The 8.97 m / 6.4 cm ATE / 3.1 cm precision result comes from `sim_e2e_run.py` (scripted teleop). Nav2 autonomous end-to-end metrics are not yet published.
+- **Teleop result only.** The 8.96 m / 5.6 cm ATE / 5.2 cm precision / 66.1% recall result comes from `sim_e2e_run.py` (scripted teleop, all timing in sim time). Nav2 autonomous end-to-end metrics are not yet published.
 - **Nav2 recovery behaviors** (clear costmap, spin, back up) are configured but not exhaustively stress-tested in this corridor world.
 - **Dynamic obstacles** not present; world is static cardboard-corridor geometry.
 - **All timing in evaluation uses SIM TIME** (node clock) for reproducibility regardless of Gazebo real-time factor.

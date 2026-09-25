@@ -3,7 +3,7 @@
     "segments": 9,
     "duration_s": 52.28,
     "cmds_published": 523,
-    "path_len_odom_m": 8.97
+    "path_len_odom_m": 8.96
   },
   "rates_hz": {
     "/scan": 30.4,
@@ -14,37 +14,37 @@
     "/platform/joint_states": 50.0
   },
   "trajectory": {
-    "ate_rmse_ekf_m": 0.0644,
-    "ate_rmse_controller_m": 0.0613,
-    "synced_samples_ekf": 1917,
+    "ate_rmse_ekf_m": 0.0558,
+    "ate_rmse_controller_m": 0.0559,
+    "synced_samples_ekf": 1566,
     "final_pose_error_ekf": {
-      "x": 0.0015,
-      "y": -0.1164,
-      "heading": 0.0185,
-      "euclidean": 0.1164
+      "x": 0.0106,
+      "y": -0.109,
+      "heading": 0.0167,
+      "euclidean": 0.1095
     },
     "final_pose_error_controller": {
-      "x": -0.0009,
-      "y": -0.1143,
-      "heading": 0.0185,
-      "euclidean": 0.1143
+      "x": -0.0015,
+      "y": -0.1147,
+      "heading": 0.0187,
+      "euclidean": 0.1147
     }
   },
   "map": {
-    "width": 170,
-    "height": 50,
+    "width": 171,
+    "height": 49,
     "resolution_m": 0.05000000074505806,
-    "occupied_cells": 489,
-    "free_cells": 7812,
-    "unknown_cells": 199,
+    "occupied_cells": 428,
+    "free_cells": 7764,
+    "unknown_cells": 187,
     "metrics_vs_gt_surfaces": {
-      "precision_rmse_m": 0.0309,
-      "precision_within_5cm": 0.9039,
-      "precision_within_10cm": 1.0,
+      "precision_rmse_m": 0.0522,
+      "precision_within_5cm": 0.7804,
+      "precision_within_10cm": 0.8972,
       "spurious_cells_beyond_30cm": 0,
-      "recall_within_10cm": 0.8977,
-      "n_surface_samples": 1222
+      "recall_within_10cm": 0.6612,
+      "n_surface_samples": 1210
     },
-    "iou_occupied_raster_reference": 0.303
+    "iou_occupied_raster_reference": 0.161
   }
 }

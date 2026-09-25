@@ -99,6 +99,11 @@ def generate_launch_description():
         default_value='false',
         description='Record all topics to an .mcap bag.',
     )
+    enable_nav2_arg = DeclareLaunchArgument(
+        'enable_nav2',
+        default_value='false',
+        description='Enable Nav2 autonomous navigation stack (requires Nav2 packages).',
+    )
     bag_dir_arg = DeclareLaunchArgument(
         'bag_dir',
         default_value=os.path.expanduser('~/Drift_bot/bags'),
@@ -110,6 +115,7 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration('rviz_config')
     egl_vendor = LaunchConfiguration('egl_vendor')
     record_bag = LaunchConfiguration('record_bag')
+    enable_nav2 = LaunchConfiguration('enable_nav2')
     bag_dir = LaunchConfiguration('bag_dir')
 
     slam_params = PathJoinSubstitution([pkg_dir, 'config', 'slam_toolbox.yaml'])
@@ -261,6 +267,7 @@ def generate_launch_description():
     )
 
     # ── 7. Nav2 (after SLAM activates, so map is available) ───────────────────
+    # Conditionally included via enable_nav2 launch argument
     nav2_params = PathJoinSubstitution([pkg_dir, 'config', 'nav2_params.yaml'])
     map_server_params = PathJoinSubstitution([pkg_dir, 'config', 'map_server.yaml'])
 
@@ -372,6 +379,23 @@ def generate_launch_description():
         )
     )
 
+    # Wrap Nav2 stack in a group conditioned on enable_nav2
+    nav2_group = GroupAction(
+        condition=IfCondition(enable_nav2),
+        actions=[
+            map_server,
+            planner_server,
+            controller_server,
+            behavior_server,
+            bt_navigator,
+            waypoint_follower,
+            lifecycle_manager_navigation,
+            lifecycle_manager_localization,
+            map_on_slam_active,
+            nav2_on_map_active,
+        ],
+    )
+
     # ── 8. Visualization ──────────────────────────────────────────────────────
     rviz_node = Node(
         package='rviz2',
@@ -463,6 +487,7 @@ def generate_launch_description():
         start_rviz_arg,
         rviz_config_arg,
         record_bag_arg,
+        enable_nav2_arg,
         bag_dir_arg,
 
         gz_sim_headless,
@@ -474,8 +499,7 @@ def generate_launch_description():
         spawners_on_bridge,
         slam_on_start,
         slam_on_configured,
-        map_on_slam_active,
-        nav2_on_map_active,
+        nav2_group,
         rviz_node,
         recorder_group,
     ])
