@@ -1,22 +1,18 @@
-# DriftBot — Gazebo Harmonic SLAM Evaluation with ROS 2 Jazzy + Nav2 Integration
+# DriftBot — Reproducible ROS 2 SLAM Evaluation in Gazebo Harmonic
 
 [![CI](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml/badge.svg)](https://github.com/Rhutvik-pachghare1999/driftbot-ros2-slam/actions/workflows/ci.yml)
 
-A ROS 2 simulation and SLAM evaluation project using:
-
-**Clearpath Jackal j100 → Gazebo Harmonic → gz_ros2_control → SICK LMS1xx lidar → robot_localization EKF → slam_toolbox → Nav2 → ground-truth trajectory/map evaluation**
+A reproducible ROS 2 Jazzy simulation stack integrating Gazebo Harmonic, Clearpath Jackal j100, SICK LMS1xx lidar, robot_localization EKF, slam_toolbox, and Nav2. The project evaluates localization and map reconstruction against **Gazebo simulator ground truth** using trajectory ATE and continuous-surface map metrics.
 
 ---
 
-## Hero: Simulation Running
+## Scope
 
-![Gazebo simulation — Jackal (j100) with SICK LMS1xx lidar in driftbot_corridor world](docs/img/slam_map_sim.png)
-
-*The corrected evaluation run: 8.96 m driven, 5.7 cm EKF ATE RMSE, 2.7 cm map precision, 99.8% surface recall, 0 spurious cells.*
+**Published benchmark is teleop-only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% observable-surface recall result comes from `sim_e2e_run.py` (scripted velocity drive, all timing in sim time). **Nav2 autonomous navigation is implemented but not yet included in the published benchmark.** Full autonomous metrics (waypoint success rate, autonomous ATE, navigation duration, recovery events) have not yet been published.
 
 ---
 
-## Verified Results (Teleop Evaluation)
+## Benchmark (Teleop Evaluation)
 
 ### Trajectory (8.96 m scripted teleop, 1,565 EKF↔GT synced samples)
 
@@ -26,29 +22,19 @@ A ROS 2 simulation and SLAM evaluation project using:
 | Controller `/platform/odom` ATE RMSE | 0.056 m |
 | Final pose error (EKF vs GT) | 0.113 m (x 0.011, y −0.112, heading 1.0°) |
 
+*5.7 cm ATE RMSE over the 8.96 m scripted trajectory in the static simulated corridor.*
+
 ### Map Quality (vs SDF continuous surfaces — walls, endcaps, two rotated boxes)
 
 | Metric | Value | Meaning |
 |--------|-------|---------|
 | Occupied-cell → surface RMSE | **0.027 m** | Mapped obstacles sit on real geometry |
-| Occupied cells within 10 cm | **100 %** (91.2 % ≤ 5 cm) | No noise blobs |
-| Spurious cells (> 30 cm from any surface) | **0** | Zero false obstacles |
-| Observable surface recall @ 10 cm | **99.8 %** | Nearly full coverage of observable surfaces |
+| Occupied cells within 10 cm | **100 %** (91.2 % ≤ 5 cm) | No occupied cells outside tolerance |
+| Occupied cells >30 cm from reference surfaces | **0** | Zero false obstacles beyond tolerance |
+| Observable-surface recall @ 10 cm | **99.8 %** | Nearly full coverage of observable surfaces |
 | Map extent | 8.6×2.5 m @ 5 cm/cell | Corridor is 8.6×2.6 m |
 
-*All metrics computed against continuous GT surfaces; raster IoU (0.330) kept in JSON as reference only. All timing uses sim time for reproducibility. Topic rates measured over 5 s sim time: /scan 90.6 Hz (Gazebo ~3× real-time factor), /platform/odom 50 Hz, /odom 30 Hz, /gt_odom 150 Hz.*
-
-### Trajectory Evidence
-
-![EKF trajectory vs ground truth over 8.96 m path](docs/img/slam_map_sim.png)
-
-*EKF `/odom` trajectory (red) overlaid on SLAM map with ground-truth walls/boxes (dashed). 1,565 synchronized samples; final pose error 0.113 m.*
-
-### Map Quality Evidence
-
-![Map quality metrics](docs/img/slam_map_sim.png)
-
-*SLAM occupancy grid (171×50 cells @ 5 cm). Green = free, dark = occupied, gray = unknown. Ground-truth walls/boxes overlaid as dashed lines. Occupied cells: 522; free: 7,818; unknown: 210. 100% of occupied cells within 10 cm of GT surfaces.*
+*All metrics computed against continuous SDF ground-truth surfaces (not rasterized); raster IoU (0.330) kept in JSON as reference only. All timing uses sim time for reproducibility. Topic rates measured over 5 s sim time: /scan 90.6 Hz (Gazebo ~3× real-time factor), /platform/odom 50 Hz, /odom 30 Hz, /gt_odom 150 Hz.*
 
 ---
 
@@ -62,7 +48,7 @@ A ROS 2 simulation and SLAM evaluation project using:
 |-----------|------|
 | **Gazebo Harmonic** | Physics + sensor simulation (SICK LMS1xx gpu_lidar @ 30 Hz, IMU @ 50 Hz) |
 | **gz_ros2_control** | Bridges Gazebo joints to ROS 2 `controller_manager` |
-| **diff_drive_controller** | Official Clearpath j100 config (skid-steer compensation, 1.5× wheel separation, realistic covariances) |
+| **diff_drive_controller** | Official Clearpath j100 config (skid-steer compensation, 1.5× wheel separation, **configured covariances**) |
 | **ros_gz_bridge** | `/scan`, `/imu/data`, `/gt_odom`, `/clock` |
 | **robot_localization EKF** | Single-stream (odom0=/platform/odom, vx+vyaw only), publishes `/odom` + TF `odom→base_link` |
 | **slam_toolbox** | Async SLAM on `/scan`, publishes `/map` + TF `map→odom` |
@@ -77,17 +63,17 @@ Gazebo (gz sim)
     │                                              │
     ├── /sensors/imu_0/data_raw ──→ /imu/data     │
     │                                              ▼
-    ├── /model/jackal/odometry ──→ /gt_odom ────→ [ground truth for evaluation]
+    ├── /model/jackal/odometry ──→ /gt_odom ────→ [Gazebo simulator ground truth for evaluation]
     │                                              │
     └── /clock ─────────────────→ /clock (sim time)
                                  │
                                  ▼
-                    ┌─────────────────────────────┐
-                    │       laptop stack          │
-                    │  /scan ──→ slam_toolbox ──→ /map ──→ Nav2 costmaps
-                    │  /platform/odom ──→ EKF ──→ /odom ──→ Nav2 odom
-                    │  /platform/cmd_vel ◄── Nav2 controller / teleop
-                    └─────────────────────────────┘
+                     ┌─────────────────────────────┐
+                     │       laptop stack          │
+                     │  /scan ──→ slam_toolbox ──→ /map ──→ Nav2 costmaps
+                     │  /platform/odom ──→ EKF ──→ /odom ──→ Nav2 odom
+                     │  /platform/cmd_vel ◄── Nav2 controller / teleop
+                     └─────────────────────────────┘
 ```
 
 ---
@@ -131,7 +117,7 @@ ros2 launch driftbot_bringup sim.launch.py start_rviz:=true enable_nav2:=true
 python3 scripts/sim_nav2_demo.py
 ```
 
-> **Note:** The autonomous demo currently has TF time-sync issues in headless Gazebo (Gazebo runs faster than real-time, causing EKF "jump back in time" errors). The teleop evaluation (`sim_e2e_run.py`) works reliably. See [Limitations](#limitations).
+> **Note:** The autonomous demo currently has TF time-sync issues in Gazebo (runs faster than real-time, causing EKF "jump back in time" errors). The teleop evaluation (`sim_e2e_run.py`) works reliably. See [Known Systems Issue](#known-systems-issue).
 
 *Add `record_bag:=true` to `sim.launch.py` for `.mcap` recording.*
 
@@ -141,7 +127,7 @@ python3 scripts/sim_nav2_demo.py
 
 ### Launch Sequence (event-driven, no fixed timers)
 
-1. **gz sim** starts (headless, EGL vendor configurable via `egl_vendor` arg)
+1. **gz sim** starts (EGL vendor configurable via `egl_vendor` arg)
 2. **Jackal spawn** triggers on gz process start (`ros_gz_sim create -file ...`)
 3. **Bridge / EKF / SLAM** start when spawn process **exits** (spawn completed)
 4. **Controller spawners** start when bridge process starts
@@ -154,7 +140,7 @@ python3 scripts/sim_nav2_demo.py
 | `/platform/cmd_vel` | `TwistStamped` | 10 Hz in | Nav2/teleop → diff_drive_controller (sim-stamped) |
 | `/platform/odom` | `Odometry` | 50 Hz | diff_drive_controller → EKF (vx+vyaw only) |
 | `/odom` | `Odometry` | 30 Hz | EKF output (`odom` frame) |
-| `/gt_odom` | `Odometry` | 50 Hz | Ground truth (eval only) |
+| `/gt_odom` | `Odometry` | 50 Hz | Gazebo ground truth (eval only) |
 | `/scan` | `LaserScan` | 30 Hz | SICK LMS1xx → slam_toolbox + Nav2 |
 | `/imu/data` | `Imu` | 50 Hz | gz IMU (bags / future fusion) |
 | `/map` | `OccupancyGrid` | 0.5 Hz | slam_toolbox + Nav2 costmaps |
@@ -162,7 +148,7 @@ python3 scripts/sim_nav2_demo.py
 
 TF tree: `robot_state_publisher` (URDF), EKF `odom→base_link`, slam_toolbox `map→odom`, Nav2 uses both.
 
-### Autonomous Navigation (Nav2)
+### Autonomous Navigation (Nav2) — *implemented, experimental*
 
 - **Global Planner:** `SmacHybrid` (hybrid A* with 2D grid + motion primitives)
 - **Local Controller:** `DWB` (Dynamic Window Approach) on `/platform/cmd_vel`
@@ -191,6 +177,14 @@ python3 scripts/sim_e2e_run.py
 - `docs/maps/sim_e2e_results.json` — machine-readable metrics (ATE 5.7 cm, precision 2.7 cm, recall 99.8%, 0 spurious)
 
 **Method:** The evaluator uses continuous SDF ground-truth surfaces (not rasterized) for map comparison, and filters trajectory samples to the exact drive window using sim-time stamps. All timing (drive, rates, settle) uses sim time for reproducibility.
+
+**Evaluation Pipeline:**
+- Records `/gt_odom` (Gazebo simulator ground truth)
+- Synchronizes estimated and ground-truth trajectories by sim-time stamp
+- Calculates ATE RMSE and final pose error
+- Reconstructs ground-truth geometry from SDF world
+- Compares occupied cells to continuous surfaces
+- Computes precision RMSE, % within tolerance, spurious cell count, observable-surface recall
 
 ---
 
@@ -225,6 +219,19 @@ python3 scripts/sim_e2e_run.py
 
 ---
 
+## Known Systems Issue
+
+**TF time-sync in headless Gazebo.**
+
+In headless Gazebo (even with xvfb-run), the simulator runs faster than real-time (~3×). The EKF receives TF transforms from slam_toolbox/map_server with timestamps in the future relative to its current sim time. This triggers "jump back in time" warnings (EKF clears TF buffer) and prevents the autonomous Nav2 demo from completing.
+
+The teleop evaluation (`sim_e2e_run.py`) works reliably because it uses sim-time pacing for all timing. The autonomous Nav2 demo requires Gazebo to run at true real-time factor 1.0 (may require different physics settings or hardware).
+
+This is a genuine systems integration problem involving:
+Gazebo sim time → TF timestamps → EKF → slam_toolbox → Nav2
+
+---
+
 ## Simulation Gotchas (Documented for Reproducibility)
 
 - **Headless EGL**: gz sim needs `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` (Mesa EGL fails headless) — set via `egl_vendor` launch arg in `sim.launch.py`.
@@ -239,12 +246,13 @@ python3 scripts/sim_e2e_run.py
 
 ## Limitations
 
-- **Published benchmark is teleop-only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% recall result comes from `sim_e2e_run.py` (scripted velocity drive, all timing in sim time). Nav2 autonomous navigation is implemented in `sim.launch.py` and `sim_nav2_demo.py`; full autonomous benchmark metrics (waypoint success rate, autonomous ATE, navigation duration, recovery events) have not yet been published.
-- **Nav2 autonomous demo has TF time-sync issues.** In headless Gazebo (even with xvfb), the simulator runs faster than real-time (~3×), causing the EKF to receive TF transforms from slam_toolbox/map_server with timestamps in the future relative to its current sim time. This triggers "jump back in time" warnings and prevents the autonomous demo from completing. The teleop evaluation (`sim_e2e_run.py`) works reliably because it uses sim-time pacing.
+- **Published benchmark is teleop-only.** The 8.96 m / 5.7 cm ATE / 2.7 cm precision / 99.8% observable-surface recall result comes from `sim_e2e_run.py` (scripted velocity drive, all timing in sim time). Nav2 autonomous navigation is implemented in `sim.launch.py` and `sim_nav2_demo.py`; full autonomous benchmark metrics (waypoint success rate, autonomous ATE, navigation duration, recovery events) have not yet been published.
+- **Nav2 autonomous demo has TF time-sync issues.** In Gazebo (even with GUI/xvfb), the simulator runs faster than real-time (~3×), causing the EKF to receive TF transforms from slam_toolbox/map_server with timestamps in the future relative to its current sim time. This triggers "jump back in time" warnings and prevents the autonomous demo from completing. The teleop evaluation (`sim_e2e_run.py`) works reliably because it uses sim-time pacing.
 - **Nav2 stack not yet built from source.** The Nav2 launch configuration and parameters are complete, but the stack requires building from source (behaviortree_cpp, GraphicsMagick, test_msgs dependencies) which was not completed in CI. Install `ros-jazzy-nav2-*` packages for out-of-the-box autonomous runs.
 - **Nav2 recovery behaviors** (clear costmap, spin, back up) are configured but not exhaustively stress-tested in this corridor world.
 - **Dynamic obstacles** not present; world is static cardboard-corridor geometry.
 - **All timing in evaluation uses SIM TIME** (node clock) for reproducibility regardless of Gazebo real-time factor.
+- **Map evaluation is against known world geometry.** The evaluator compares the map against the SDF world used to generate the simulation. This validates reconstruction accuracy in a known environment; it does not prove SLAM performance in unknown environments.
 
 ---
 
